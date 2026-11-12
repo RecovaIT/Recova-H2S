@@ -1,0 +1,105 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-recova}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-recova}
+      POSTGRES_DB: ${POSTGRES_DB:-recova}
+    ports:
+      - "5432:5432"
+    volumes:
+      - recova_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-recova} -d ${POSTGRES_DB:-recova}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-recova}:${POSTGRES_PASSWORD:-recova}@postgres:5432/${POSTGRES_DB:-recova}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY before running production stack}
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?Set FIELD_ENCRYPTION_KEY before running production stack}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000"]}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3000}
+      RUN_EMBEDDED_WORKER: "false"
+      LLM_PROVIDER: ${LLM_PROVIDER:-none}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+      MALAFFI_BASE_URL: ${MALAFFI_BASE_URL:-}
+      MALAFFI_CLIENT_ID: ${MALAFFI_CLIENT_ID:-}
+      MALAFFI_CLIENT_SECRET: ${MALAFFI_CLIENT_SECRET:-}
+      SAHATNA_BASE_URL: ${SAHATNA_BASE_URL:-}
+      SAHATNA_API_KEY: ${SAHATNA_API_KEY:-}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    command: ["python", "-m", "app.cli", "worker", "--concurrency", "2"]
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-recova}:${POSTGRES_PASSWORD:-recova}@postgres:5432/${POSTGRES_DB:-recova}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY before running production stack}
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?Set FIELD_ENCRYPTION_KEY before running production stack}
+      LLM_PROVIDER: ${LLM_PROVIDER:-none}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      MALAFFI_BASE_URL: ${MALAFFI_BASE_URL:-}
+      SAHATNA_BASE_URL: ${SAHATNA_BASE_URL:-}
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        BACKEND_INTERNAL_URL: http://backend:8000
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+      NEXT_PUBLIC_API_BASE_URL: /api/v1
+    ports:
+      - "3000:3000"
+
+volumes:
+  recova_pgdata:
