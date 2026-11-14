@@ -5,9 +5,7 @@ export type DomainTrack =
   | 'osh-workforce';
 
 export type RiskTier = 'GREEN' | 'AMBER' | 'RED' | 'EMERGENCY_BYPASS';
-
 export type AgentNodeStatus = 'idle' | 'running' | 'passed' | 'flagged' | 'bypassed';
-
 export type MetricDirection = 'lower_is_bad' | 'higher_is_bad';
 
 export interface PatientConfounders {
@@ -32,8 +30,8 @@ export interface DeterministicScoreOutput {
   sampleSd: number;
   adjustedSe: number;
   practiceGainOffset: number;
-  zScore: number;        // raw, undirected Z — for display
-  signedZ: number;       // direction-aware Z — used for tier
+  zScore: number;      // raw, undirected Z for display
+  signedZ: number;     // direction-aware Z used for tier
   riskTier: RiskTier;
   acuteCrisisFlag?: boolean;
   confidenceIndex: number;
@@ -57,6 +55,6 @@ export interface SyntheticPatientCase {
   missingDataStreams?: string[];
   acuteCrisisFlag?: boolean;
   symptomsText: string;
-  expectedTier?: RiskTier;     // answer key for the benchmark runner
-  expectedSignedZ?: number;    // optional assertion target
+  expectedTier?: RiskTier;
+  expectedSignedZ?: number;
 }
