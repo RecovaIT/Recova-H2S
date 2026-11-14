@@ -117,3 +117,123 @@ def test_auth_csrf_tenant_isolation_and_rbac(client: TestClient):
     assert client.get("/api/v1/workforce/identifiable-risks").status_code == 403
     # Can access anonymised heatmap
     assert client.get("/api/v1/workforce/heatmap").status_code == 200
+
+
+def test_public_organization_registration_isolation_and_conflicts(client):
+    bootstrap_org_and_admin(client)
+
+    # Platform admin creates a patient in Org A
+    pat_a = client.post(
+        "/api/v1/patients",
+        headers=auth_headers(client),
+        json={"mrn": "MRN-ORGA-01", "given_name": "Sara", "family_name": "Al-Maktoum"},
+    )
+    assert pat_a.status_code == 201, pat_a.text
+    pat_a_id = pat_a.json()["id"]
+
+    # Platform admin creates another org via /organizations and immediately gets switcher membership
+    org_c = client.post(
+        "/api/v1/organizations",
+        headers=auth_headers(client),
+        json={
+            "name": "Al Ain Rehab",
+            "slug": "al-ain-rehab",
+            "org_type": "rehab_center",
+            "enabled_tracks": ["core"],
+        },
+    )
+    assert org_c.status_code == 201, org_c.text
+    org_c_id = org_c.json()["id"]
+    me_res = client.get("/api/v1/auth/me")
+    assert me_res.status_code == 200
+    assert any(m["organization_id"] == org_c_id for m in me_res.json()["memberships"])
+    sw = client.post(
+        "/api/v1/auth/switch-organization",
+        headers=auth_headers(client),
+        json={"organization_id": org_c_id},
+    )
+    assert sw.status_code == 200, sw.text
+    assert sw.json()["active_organization"]["slug"] == "al-ain-rehab"
+
+    # Log out
+    assert client.post("/api/v1/auth/logout", headers=auth_headers(client)).status_code == 200
+    assert client.get("/api/v1/auth/status").json()["needs_bootstrap"] is False
+
+    # Public bootstrap remains permanently locked once an admin exists
+    locked = client.post(
+        "/api/v1/auth/bootstrap",
+        json={
+            "organization_name": "Rogue Org",
+            "organization_slug": "rogue-org",
+            "org_type": "clinic",
+            "enabled_tracks": ["core"],
+            "admin_email": "rogue@example.ae",
+            "admin_full_name": "Rogue User",
+            "admin_password": "StrongPassword99!",
+        },
+    )
+    assert locked.status_code == 409
+
+    # Self-service tenant registration creates isolated org + org_admin (non-platform-admin) + cookies
+    reg = client.post(
+        "/api/v1/auth/register-organization",
+        json={
+            "organization_name": "Dubai Care Clinic",
+            "organization_slug": "dubai-clinic",
+            "org_type": "clinic",
+            "enabled_tracks": ["core", "loop"],
+            "admin_email": "admin@dubaiclinic.ae",
+            "admin_full_name": "Dr. Tariq Saeed",
+            "admin_password": "DubaiClinicPass123!",
+            "admin_license_number": "DHA-PHY-4402",
+        },
+    )
+    assert reg.status_code == 201, reg.text
+    body = reg.json()
+    assert body["user"]["is_platform_admin"] is False
+    assert body["role"] == "org_admin"
+    assert body["active_organization"]["slug"] == "dubai-clinic"
+    assert body["tracks"] == ["core", "loop"]
+    assert client.cookies.get("recova_session")
+    assert client.cookies.get("recova_csrf")
+
+    # Tenant isolation holds strictly against Org A data and platform admin routes
+    assert client.get("/api/v1/patients").json()["total"] == 0
+    assert client.get(f"/api/v1/patients/{pat_a_id}").status_code == 404
+    assert (
+        client.post(
+            "/api/v1/organizations",
+            headers=auth_headers(client),
+            json={"name": "Nope", "slug": "nope-org", "org_type": "clinic", "enabled_tracks": ["core"]},
+        ).status_code
+        == 403
+    )
+
+    # Duplicate slug or duplicate email are cleanly rejected with 409
+    dup_slug = client.post(
+        "/api/v1/auth/register-organization",
+        json={
+            "organization_name": "Another AD",
+            "organization_slug": "ad-wellness",
+            "org_type": "hospital",
+            "enabled_tracks": ["core"],
+            "admin_email": "fresh@other.ae",
+            "admin_full_name": "Fresh Admin",
+            "admin_password": "StrongPassword99!",
+        },
+    )
+    assert dup_slug.status_code == 409
+
+    dup_email = client.post(
+        "/api/v1/auth/register-organization",
+        json={
+            "organization_name": "Fresh Org",
+            "organization_slug": "fresh-org",
+            "org_type": "hospital",
+            "enabled_tracks": ["core"],
+            "admin_email": "admin@adwellness.ae",
+            "admin_full_name": "Duplicate Email Admin",
+            "admin_password": "StrongPassword99!",
+        },
+    )
+    assert dup_email.status_code == 409

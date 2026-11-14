@@ -77,5 +77,9 @@ export function AuthGuard({
     );
   }
 
-  return <>{children}</>;
+  return (
+    <React.Fragment key={session.active_organization?.id ?? "platform"}>
+      {children}
+    </React.Fragment>
+  );
 }

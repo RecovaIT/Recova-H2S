@@ -5,7 +5,7 @@ All application endpoints live under FastAPI with version prefix `/api/v1` (plus
 ## 1. Conventions
 
 - **Authentication:** Stateful opaque token stored in HttpOnly cookie `recova_session` (or `Authorization: Bearer <token>` for programmatic API clients).
-- **CSRF Protection:** Cookie-authenticated mutating requests (`POST`, `PUT`, `PATCH`, `DELETE`) require header `X-CSRF-Token` matching the session's `csrf_token` (`recova_csrf` cookie). Requests to `/auth/bootstrap`, `/auth/login`, `/auth/password-reset/request`, `/auth/password-reset/confirm`, and Bearer-header requests are exempt.
+- **CSRF Protection:** Cookie-authenticated mutating requests (`POST`, `PUT`, `PATCH`, `DELETE`) require header `X-CSRF-Token` matching the session's `csrf_token` (`recova_csrf` cookie). Public unauthenticated auth requests (`/auth/bootstrap`, `/auth/register-organization`, `/auth/login`, `/auth/password-reset/request`, `/auth/password-reset/confirm`) and Bearer-header requests are exempt.
 - **Tenant Isolation:** Organization context resolves from the active session (switchable via `POST /api/v1/auth/switch-organization` or `X-Organization-ID` header where the user holds active membership).
 - **Error Envelope:**
   ```json
@@ -31,7 +31,8 @@ All application endpoints live under FastAPI with version prefix `/api/v1` (plus
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/v1/auth/status` | Reports `{"needs_bootstrap": boolean}` |
-| `POST` | `/api/v1/auth/bootstrap` | First-run org + `org_admin` creation (rate-limited; fails once initialized) |
+| `POST` | `/api/v1/auth/bootstrap` | First-run org + `platform_admin`/`org_admin` creation (locks permanently once initialized) |
+| `POST` | `/api/v1/auth/register-organization` | Public self-service tenant onboarding: creates isolated org + `org_admin` (`is_platform_admin=false`, rate-limited) |
 | `POST` | `/api/v1/auth/login` | Email/password login -> sets `recova_session` + `recova_csrf` cookies |
 | `POST` | `/api/v1/auth/logout` | Revokes active session & clears cookies |
 | `GET` | `/api/v1/auth/me` | Returns current user, active org, role, effective permissions, enabled tracks, CSRF token |

@@ -13,6 +13,7 @@ interface AuthContextValue {
   refreshSession: () => Promise<void>;
   login: (payload: LoginPayload) => Promise<SessionResponse>;
   bootstrap: (payload: BootstrapPayload) => Promise<SessionResponse>;
+  registerOrganization: (payload: BootstrapPayload) => Promise<SessionResponse>;
   logout: () => Promise<void>;
   switchOrganization: (orgId: string) => Promise<void>;
   hasPermission: (perm: string) => boolean;
@@ -26,6 +27,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [needsBootstrap, setNeedsBootstrap] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [orgEpoch, setOrgEpoch] = useState(0);
 
   const loadSession = useCallback(async () => {
     try {
@@ -63,7 +65,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [loadSession]);
 
   const refreshSession = useCallback(async () => {
-    setLoading(true);
     await loadSession();
   }, [loadSession]);
 
@@ -83,6 +84,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return res;
   }, []);
 
+  const registerOrganization = useCallback(async (payload: BootstrapPayload) => {
+    const res = await authService.registerOrganization(payload);
+    setSession(res);
+    setNeedsBootstrap(false);
+    setError(null);
+    return res;
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await authService.logout();
@@ -94,6 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const switchOrganization = useCallback(async (orgId: string) => {
     const res = await authService.switchOrganization(orgId);
     setSession(res);
+    setOrgEpoch((n) => n + 1);
   }, []);
 
   const hasPermission = useCallback(
@@ -122,13 +132,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         refreshSession,
         login,
         bootstrap,
+        registerOrganization,
         logout,
         switchOrganization,
         hasPermission,
         hasTrack,
       }}
     >
-      {children}
+      <React.Fragment key={orgEpoch}>{children}</React.Fragment>
     </AuthContext.Provider>
   );
 }

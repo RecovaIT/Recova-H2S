@@ -80,23 +80,32 @@ def needs_bootstrap(db: Session) -> bool:
     return (db.scalar(select(func.count(User.id))) or 0) == 0
 
 
-def bootstrap_platform(
+def _create_org_and_admin_session(
     db: Session,
     req: BootstrapRequest,
     *,
+    is_platform_admin: bool,
+    audit_action: str,
     ip_address: str | None = None,
     user_agent: str | None = None,
 ) -> tuple[SessionResponse, str, str]:
-    """One-time platform initialisation when zero users exist."""
-    if not needs_bootstrap(db):
-        raise Conflict("Platform has already been initialised")
     problems = validate_password_strength(req.admin_password)
     if problems:
         raise ValidationFailed("; ".join(problems))
+    if not req.enabled_tracks:
+        raise ValidationFailed("Select at least one application track")
+
+    slug = req.organization_slug.strip().lower()
+    email = req.admin_email.strip().lower()
+
+    if db.scalar(select(Organization).where(Organization.slug == slug)) is not None:
+        raise Conflict(f"Organisation slug '{slug}' already exists")
+    if db.scalar(select(User).where(User.email == email)) is not None:
+        raise Conflict(f"An account with email '{email}' already exists. Sign in or use another admin email.")
 
     org = Organization(
         name=req.organization_name.strip(),
-        slug=req.organization_slug.strip().lower(),
+        slug=slug,
         org_type=req.org_type,
         enabled_tracks=[t.value for t in req.enabled_tracks],
         country="UAE",
@@ -107,11 +116,11 @@ def bootstrap_platform(
     db.flush()
 
     user = User(
-        email=req.admin_email.strip().lower(),
+        email=email,
         full_name=req.admin_full_name.strip(),
         password_hash=hash_password(req.admin_password),
         is_active=True,
-        is_platform_admin=True,
+        is_platform_admin=is_platform_admin,
         preferred_language="en",
         license_number=req.admin_license_number,
         last_login_at=utcnow(),
@@ -131,7 +140,7 @@ def bootstrap_platform(
     raw_session, raw_csrf, sess = _create_session(db, user, org.id, ip_address=ip_address, user_agent=user_agent)
     audit.record(
         db,
-        action="platform.bootstrap",
+        action=audit_action,
         resource_type="organization",
         resource_id=org.id,
         organization_id=org.id,
@@ -142,6 +151,46 @@ def bootstrap_platform(
     )
     db.commit()
     return _session_payload(db, user, sess, raw_csrf=raw_csrf), raw_session, raw_csrf
+
+
+def bootstrap_platform(
+    db: Session,
+    req: BootstrapRequest,
+    *,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+) -> tuple[SessionResponse, str, str]:
+    """One-time platform initialisation when zero users exist."""
+    if not needs_bootstrap(db):
+        raise Conflict("Platform has already been initialised")
+    return _create_org_and_admin_session(
+        db,
+        req,
+        is_platform_admin=True,
+        audit_action="platform.bootstrap",
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+
+def register_organization(
+    db: Session,
+    req: BootstrapRequest,
+    *,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+) -> tuple[SessionResponse, str, str]:
+    """Self-service tenant organisation onboarding from the public login screen."""
+    s = get_settings()
+    limiter.check(f"register_org:{ip_address or 'unknown'}", s.rate_limit_login_per_minute, 60.0)
+    return _create_org_and_admin_session(
+        db,
+        req,
+        is_platform_admin=False,
+        audit_action="organization.register",
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
 
 
 def _create_session(

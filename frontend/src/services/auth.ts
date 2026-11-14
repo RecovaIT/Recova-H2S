@@ -29,6 +29,12 @@ export const authService = {
     return res;
   },
 
+  async registerOrganization(payload: BootstrapPayload): Promise<SessionResponse> {
+    const res = await api.post<SessionResponse>("/auth/register-organization", payload);
+    setCsrfToken(res.csrf_token);
+    return res;
+  },
+
   async login(payload: LoginPayload): Promise<SessionResponse> {
     const res = await api.post<SessionResponse>("/auth/login", payload);
     setCsrfToken(res.csrf_token);

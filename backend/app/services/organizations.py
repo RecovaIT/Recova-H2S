@@ -57,6 +57,14 @@ def create_organization(ctx: AuthContext, req: OrganizationCreate) -> Organizati
     )
     ctx.db.add(org)
     ctx.db.flush()
+    membership = Membership(
+        user_id=ctx.user.id,
+        organization_id=org.id,
+        role=Role.ORG_ADMIN.value,
+        is_active=True,
+        department_ids=[],
+    )
+    ctx.db.add(membership)
     ctx.audit("organization.create", "organization", org.id, details={"slug": org.slug})
     ctx.db.commit()
     return org

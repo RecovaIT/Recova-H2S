@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Shield, Users } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { opsService } from "@/services/ops";
@@ -24,11 +25,26 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
 
-export default function AdminPage() {
-  const { hasPermission } = useAuth();
+const ADMIN_TABS = new Set(["users", "rbac", "orgs", "audit", "jobs"]);
+
+function AdminPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { session, hasPermission, refreshSession, switchOrganization } = useAuth();
   const { pushToast } = useToast();
 
-  const [tab, setTab] = useState("users");
+  const requestedTab = searchParams.get("tab");
+  const canViewAudit = hasPermission("audit:read");
+  const tab =
+    requestedTab &&
+    ADMIN_TABS.has(requestedTab) &&
+    (canViewAudit || (requestedTab !== "audit" && requestedTab !== "jobs"))
+      ? requestedTab
+      : "users";
+
+  const handleTabChange = (next: string) => {
+    router.replace(`/admin?tab=${next}`, { scroll: false });
+  };
   const [users, setUsers] = useState<UserWithMemberships[]>([]);
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [roles, setRoles] = useState<RolePermissionView[]>([]);
@@ -143,6 +159,7 @@ export default function AdminPage() {
       setOrgName("");
       setOrgSlug("");
       pushToast("Tenant organisation provisioned", "success");
+      await refreshSession();
       await loadAdmin();
     } catch (err) {
       pushToast("Organisation creation failed", "error", err instanceof Error ? err.message : undefined);
@@ -151,13 +168,25 @@ export default function AdminPage() {
     }
   };
 
+  const handleSwitchOrg = async (orgId: string) => {
+    setBusy(true);
+    try {
+      await switchOrganization(orgId);
+      pushToast("Active organisation switched", "success");
+      await loadAdmin();
+    } catch (err) {
+      pushToast("Organisation switch failed", "error", err instanceof Error ? err.message : undefined);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <AuthGuard requiredPermission="users:read">
-      <AppShell
-        title="Platform Administration &amp; Governance"
-        subtitle="Users, Multi-Tenant Organisations, Dynamic RBAC Permission Overrides, Audit Logs, and Job Queue."
-      >
-        <Tabs value={tab} onValueChange={setTab}>
+    <AppShell
+      title="Platform Administration &amp; Governance"
+      subtitle="Users, Multi-Tenant Organisations, Dynamic RBAC Permission Overrides, Audit Logs, and Job Queue."
+    >
+      <Tabs value={tab} onValueChange={handleTabChange}>
           <TabsList>
             <TabsTrigger value="users">Users ({users.length})</TabsTrigger>
             <TabsTrigger value="rbac">RBAC Roles ({roles.length})</TabsTrigger>
@@ -350,17 +379,38 @@ export default function AdminPage() {
                       <TableHead>Slug</TableHead>
                       <TableHead>Type</TableHead>
                       <TableHead>Tracks</TableHead>
+                      <TableHead className="text-right">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {orgs.map((o) => (
-                      <TableRow key={o.id}>
-                        <TableCell className="text-xs font-semibold">{o.name}</TableCell>
-                        <TableCell className="font-mono text-xs">{o.slug}</TableCell>
-                        <TableCell className="text-xs">{formatLabel(o.org_type)}</TableCell>
-                        <TableCell className="text-xs uppercase">{o.enabled_tracks.join(", ")}</TableCell>
-                      </TableRow>
-                    ))}
+                    {orgs.map((o) => {
+                      const isActive = o.id === session?.active_organization?.id;
+                      const isMember = session?.memberships.some((m) => m.organization_id === o.id);
+                      return (
+                        <TableRow key={o.id}>
+                          <TableCell className="text-xs font-semibold">{o.name}</TableCell>
+                          <TableCell className="font-mono text-xs">{o.slug}</TableCell>
+                          <TableCell className="text-xs">{formatLabel(o.org_type)}</TableCell>
+                          <TableCell className="text-xs uppercase">{o.enabled_tracks.join(", ")}</TableCell>
+                          <TableCell className="text-right">
+                            {isActive ? (
+                              <Badge variant="outline">Active</Badge>
+                            ) : isMember ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={busy}
+                                onClick={() => void handleSwitchOrg(o.id)}
+                              >
+                                Switch
+                              </Button>
+                            ) : (
+                              <span className="text-[11px] text-slate-400">No membership</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </CardContent>
@@ -424,6 +474,21 @@ export default function AdminPage() {
           </TabsContent>
         </Tabs>
       </AppShell>
+  );
+}
+
+export default function AdminPage() {
+  return (
+    <AuthGuard requiredPermission="users:read">
+      <Suspense
+        fallback={
+          <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-600">
+            Loading administration workspace...
+          </div>
+        }
+      >
+        <AdminPageContent />
+      </Suspense>
     </AuthGuard>
   );
 }

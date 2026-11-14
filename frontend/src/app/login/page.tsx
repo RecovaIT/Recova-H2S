@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Activity, Lock } from "lucide-react";
+import { Activity, Building2, Lock } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -92,6 +92,19 @@ export default function LoginPage() {
                 Forgot password?
               </Link>
               <span>Zero hardcoded demo credentials</span>
+            </div>
+
+            <div className="border-t border-slate-200 pt-4">
+              <p className="mb-2 text-center text-xs text-slate-500">
+                Onboarding a new clinic, hospital, or employer workspace?
+              </p>
+              <Link
+                href="/register-organization"
+                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600"
+              >
+                <Building2 className="h-4 w-4 text-teal-700" />
+                Add New Organisation
+              </Link>
             </div>
           </form>
         </CardContent>

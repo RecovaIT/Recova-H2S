@@ -18,6 +18,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Plus,
   Radio,
   Settings,
   Shield,
@@ -172,8 +173,19 @@ export function AppShell({
 
       {session && session.memberships.length > 0 && (
         <div className="border-b border-slate-800 px-3 py-3">
-          <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-            <Building2 className="h-3 w-3" /> Organisation
+          <div className="mb-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            <span className="flex items-center gap-1.5">
+              <Building2 className="h-3 w-3" /> Organisation
+            </span>
+            {hasPermission("platform:admin") && (
+              <Link
+                href="/admin?tab=orgs"
+                className="flex items-center gap-0.5 font-medium text-teal-400 hover:text-teal-300"
+                title="Add or manage organisations"
+              >
+                <Plus className="h-3 w-3" /> Add
+              </Link>
+            )}
           </div>
           {session.memberships.length > 1 ? (
             <Select

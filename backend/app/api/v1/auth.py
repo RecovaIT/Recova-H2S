@@ -69,6 +69,19 @@ def bootstrap(req: BootstrapRequest, request: Request, response: Response, db: S
     return sess_resp
 
 
+@router.post("/register-organization", response_model=SessionResponse, status_code=201)
+def register_organization(req: BootstrapRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+    """Provision a new isolated tenant organisation and sign in its initial Org Admin."""
+    sess_resp, raw_sess, raw_csrf = auth_svc.register_organization(
+        db,
+        req,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    _set_session_cookies(response, raw_sess, raw_csrf)
+    return sess_resp
+
+
 @router.post("/login", response_model=SessionResponse)
 def login(req: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     sess_resp, raw_sess, raw_csrf = auth_svc.login(
