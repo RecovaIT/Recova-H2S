@@ -31,7 +31,7 @@ Consents are stored as an append-only ledger (`consents` table):
 | --- | --- |
 | `data_processing` | **Mandatory in Gate 1.** Absence or revocation stops routine scoring (`status="blocked"`). |
 | `wearable_ingestion` | Governs passive device stream ingestion. |
-| `llm_synthesis` | If revoked, Agent 5 stops with `status="consent_not_granted"` while deterministic Agent 4 remains operational. |
+| `llm_synthesis` | An explicit grant is required. If absent or revoked, Agent 5 stops with `status="consent_not_granted"` while deterministic Agent 4 remains operational. |
 | `family_notification` | Governs family/emergency alert outreach pathways. |
 | `hie_sharing` | Controls Malaffi / HIE Bundle transmission authorization. |
 | `supervisor_identifiable` | Explicit worker consent required before any supervisor role can inspect identifiable worker risks. |

@@ -3,7 +3,8 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Activity, Building2, Lock } from "lucide-react";
+import { Building2, Lock } from "lucide-react";
+import { RecovaMark } from "@/components/RecovaMark";
 import { useAuth } from "@/hooks/useAuth";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -23,7 +24,7 @@ export default function LoginPage() {
     if (needsBootstrap) {
       router.replace("/bootstrap");
     } else if (session) {
-      router.replace("/dashboard");
+      router.replace(session?.role === "patient" ? "/portal" : "/dashboard");
     }
   }, [loading, needsBootstrap, session, router]);
 
@@ -32,8 +33,8 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await login({ email: email.trim(), password });
-      router.replace("/dashboard");
+      const result = await login({ email: email.trim(), password });
+      router.replace(result.role === "patient" ? "/portal" : "/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed");
     } finally {
@@ -45,12 +46,12 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
       <Card className="w-full max-w-md shadow-md">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-xl bg-teal-700 text-white">
-            <Activity className="h-5 w-5" />
+          <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-xl bg-teal-700 text-[#aeff9a]">
+            <RecovaMark size={28} />
           </div>
-          <CardTitle className="text-xl">Recova Anticipatory Health</CardTitle>
+          <CardTitle className="text-xl">Welcome to Recova</CardTitle>
           <CardDescription>
-            Sign in with your clinical or organisational credentials. Sessions use HttpOnly cookies with CSRF protection.
+            Sign in with your clinical or organisational credentials.
           </CardDescription>
         </CardHeader>
         <CardContent>

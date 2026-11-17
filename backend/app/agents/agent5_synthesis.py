@@ -47,9 +47,9 @@ def run_agent5(
     active_scopes: set[str],
     revoked_scopes: set[str],
 ) -> tuple[Agent5Input, Agent5Output, ClinicalSynthesis]:
-    # Consent check: if llm_synthesis was explicitly revoked (or org mandates explicit opt-in), respect it.
+    # External synthesis requires explicit processing and synthesis grants.
     llm_explicitly_revoked = ConsentScope.LLM_SYNTHESIS.value in revoked_scopes
-    llm_consent_granted = not llm_explicitly_revoked and ConsentScope.DATA_PROCESSING.value in active_scopes
+    llm_consent_granted = not llm_explicitly_revoked and {ConsentScope.DATA_PROCESSING.value, ConsentScope.LLM_SYNTHESIS.value}.issubset(active_scopes)
 
     inp = Agent5Input(
         track=bundle.track,

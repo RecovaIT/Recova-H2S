@@ -113,7 +113,7 @@ def test_core_end_to_end_closed_loop_and_fhir(client: TestClient):
     assert run["scoring"]["primary_metric_code"] == "sleep_hours"
     assert run["scoring"]["primary_z"] < -1.96
     # Honest LLM status when unconfigured
-    assert run["synthesis"]["status"] == "provider_not_configured"
+    assert run["synthesis"]["status"] == "consent_not_granted"
     assert run["synthesis"]["summary_en"] is None
 
     # 7. Proposed referral created by Agent 6 with matching facility & Thiqa coverage

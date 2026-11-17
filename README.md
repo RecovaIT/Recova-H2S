@@ -12,7 +12,7 @@ Recova is a multi-track anticipatory digital health platform built around **one 
 - **FastAPI Single Source of Truth:** All authentication, authorization, clinical business rules, baseline math, LLM calls, FHIR serialization, referral orchestration, and database persistence live in [`backend/`](backend/). Next.js App Router proxies `/api/v1/*` to FastAPI and contains no alternative server-side business backend.
 - **Deterministic Risk Classification:** Agent 4 computes personal baselines (mean of initial 3–5 stable windows), sample SD, zero-variance SD floors, confounder multipliers, logarithmic practice adjustments, and longitudinal drift $Z$-scores strictly in Python ([`backend/app/engine/scoring.py`](backend/app/engine/scoring.py)). **No LLM computes or overrides risk tiers.**
 - **Independent Emergency Gate:** Gate 2 evaluates physiological red flags and multilingual (English + Arabic) acute crisis indicators deterministically before routine scoring or LLM synthesis, immediately creating an `EmergencyEvent` and STAT `emergency_triage` referral.
-- **DECIDE-AI Clinical Safety & Non-Fabrication:** Agent 5 requires patient consent (`data_processing` without `llm_synthesis` revocation), strips PII before calling a configured LLM provider, validates JSON output against `SynthesisDraftSchema`, and honestly records `provider_not_configured` when no LLM key is present. Unconfigured notifications, Malaffi HIE, and Sahatna integrations likewise report `not_configured` rather than simulating success.
+- **DECIDE-AI Clinical Safety & Non-Fabrication:** Agent 5 requires patient consent (explicit `data_processing` and `llm_synthesis` grants), strips PII before calling a configured LLM provider, validates JSON output against `SynthesisDraftSchema`, and honestly records `provider_not_configured` when no LLM key is present. Unconfigured notifications, Malaffi HIE, and Sahatna integrations likewise report `not_configured` rather than simulating success.
 
 ## Technology Stack
 
@@ -118,6 +118,10 @@ Recova-H2S/
 
 ## Documentation Index
 
+- [Implementation PRD for the unified platform](docs/implementation-prd-2026-11-17.md)
+- [Implementation PRD as PDF](docs/implementation-prd-2026-11-17.pdf)
+- [Patient portal implementation and integration handoff](docs/patient-portal-handoff.md)
+- [Historical readiness audit from 16 November](docs/readiness-audit-2026-11-16.md)
 - [System Architecture](docs/architecture.md)
 - [Database Schema & Migrations](docs/database-schema.md)
 - [REST, SSE & WebSocket API Reference](docs/api.md)
@@ -127,3 +131,25 @@ Recova-H2S/
 - [Environment Configuration](docs/environment-configuration.md)
 - [Deployment Runbook](docs/deployment.md)
 - [Testing & Synthetic Validation Suite](docs/testing.md)
+
+## Continue the patient portal work
+
+The shared implementation branch is `Doctware`. Update an existing checkout with:
+
+```bash
+git fetch origin
+git switch Doctware
+git pull --ff-only origin Doctware
+```
+
+After configuring and migrating the backend using the quickstart, generate the 30 synthetic participant accounts from `backend/`:
+
+```bash
+python -m scripts.seed_portal_demo
+```
+
+The script creates 8 Recovery, 8 Loop, 7 Neuro and 7 WorkSafe accounts. It writes generated credentials to `output/portal-test-accounts.csv` in the parent workspace directory and retains them on normal reruns. Each developer generates credentials for their own database. Set `FRONTEND_BASE_URL` in the backend environment before seeding if your frontend uses a custom host or port. Synthetic provisioning is disabled in production mode.
+
+Install the updated frontend dependencies with `npm ci` from `frontend/`, then start the API and frontend as described above. Sign in with a generated patient account to open `/portal`. Patient identities use the existing `Patient.portal_user_id` linkage and enrolment-scoped endpoints.
+
+The patient handoff documents the working check-ins, wearable CSV import, consent controls, memory practice, care views and notice acknowledgement. It also identifies the provider authorisation, live invitation, full clinical assessment and authority-service integration work that remains with the corresponding workstreams.

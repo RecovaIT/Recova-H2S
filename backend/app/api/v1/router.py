@@ -25,6 +25,7 @@ from app.api.v1.clinical import (
 from app.api.v1.engine import agents_router, baselines_router, pipeline_router, scoring_router
 from app.api.v1.ops import benchmarks_router, fhir_router, reports_router, settings_router
 from app.api.v1.orgs_users import audit_router, orgs_router, users_router
+from app.api.v1.portal import router as portal_router
 
 api_v1_router = APIRouter()
 for r in [
@@ -53,5 +54,6 @@ for r in [
     audit_router,
     settings_router,
     reports_router,
+    portal_router,
 ]:
     api_v1_router.include_router(r)

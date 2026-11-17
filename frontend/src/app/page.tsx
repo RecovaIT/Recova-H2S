@@ -14,7 +14,7 @@ export default function HomePage() {
     if (needsBootstrap) {
       router.replace("/bootstrap");
     } else if (session) {
-      router.replace("/dashboard");
+      router.replace(session?.role === "patient" ? "/portal" : "/dashboard");
     } else {
       router.replace("/login");
     }
