@@ -5,6 +5,7 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -63,6 +64,17 @@ export function LongitudinalTrendChart({
       }));
   }, [observations, activeMetric]);
 
+  const activeUnit = chartData[0]?.unit || "";
+
+  const upperAmber =
+    activeBaseline && activeBaseline.n_windows > 0
+      ? activeBaseline.mean + 1.0 * Math.max(activeBaseline.sample_sd, 0.01)
+      : null;
+  const lowerAmber =
+    activeBaseline && activeBaseline.n_windows > 0
+      ? activeBaseline.mean - 1.0 * Math.max(activeBaseline.sample_sd, 0.01)
+      : null;
+
   const upperRed =
     activeBaseline && activeBaseline.n_windows > 0
       ? activeBaseline.mean + 1.96 * Math.max(activeBaseline.sample_sd, 0.01)
@@ -100,7 +112,24 @@ export function LongitudinalTrendChart({
         )}
       </CardHeader>
 
-      <CardContent>
+      <CardContent className="space-y-3">
+        {activeBaseline && (
+          <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600 px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900/40 rounded-md border border-slate-200 dark:border-slate-800">
+            <span className="flex items-center gap-1.5 font-medium">
+              <span className="inline-block w-3 h-3 rounded bg-emerald-500/20 border border-emerald-500" />
+              Stable (|Z| &lt; 1.0σ)
+            </span>
+            <span className="flex items-center gap-1.5 font-medium">
+              <span className="inline-block w-3 h-3 rounded bg-amber-500/25 border border-amber-500" />
+              Early Drift (1.0σ ≤ |Z| &lt; 1.96σ)
+            </span>
+            <span className="flex items-center gap-1.5 font-medium">
+              <span className="inline-block w-3 h-3 rounded bg-rose-500/25 border border-rose-500" />
+              Elevated Alert (|Z| ≥ 1.96σ)
+            </span>
+          </div>
+        )}
+
         {chartData.length === 0 ? (
           <EmptyState
             title="No numeric longitudinal observations recorded"
@@ -109,10 +138,24 @@ export function LongitudinalTrendChart({
         ) : (
           <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 5 }}>
+              <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="dateLabel" tick={{ fontSize: 11, fill: "#475569" }} />
-                <YAxis tick={{ fontSize: 11, fill: "#475569" }} domain={["auto", "auto"]} />
+                <YAxis
+                  tick={{ fontSize: 11, fill: "#475569" }}
+                  domain={["auto", "auto"]}
+                  label={
+                    activeUnit
+                      ? {
+                          value: activeUnit,
+                          angle: -90,
+                          position: "insideLeft",
+                          style: { textAnchor: "middle", fill: "#64748b", fontSize: 11 },
+                          offset: -2,
+                        }
+                      : undefined
+                  }
+                />
                 <Tooltip
                   contentStyle={{
                     borderRadius: "8px",
@@ -120,6 +163,52 @@ export function LongitudinalTrendChart({
                     fontSize: "12px",
                   }}
                 />
+
+                {/* Shaded baseline z-score regions */}
+                {activeBaseline && upperAmber !== null && lowerAmber !== null && (
+                  <ReferenceArea
+                    y1={Math.max(0, lowerAmber)}
+                    y2={upperAmber}
+                    fill="#10b981"
+                    fillOpacity={0.08}
+                    ifOverflow="hidden"
+                  />
+                )}
+                {activeBaseline && upperAmber !== null && upperRed !== null && (
+                  <ReferenceArea
+                    y1={upperAmber}
+                    y2={upperRed}
+                    fill="#f59e0b"
+                    fillOpacity={0.12}
+                    ifOverflow="hidden"
+                  />
+                )}
+                {activeBaseline && lowerAmber !== null && lowerRed !== null && (
+                  <ReferenceArea
+                    y1={Math.max(0, lowerRed)}
+                    y2={Math.max(0, lowerAmber)}
+                    fill="#f59e0b"
+                    fillOpacity={0.12}
+                    ifOverflow="hidden"
+                  />
+                )}
+                {activeBaseline && upperRed !== null && (
+                  <ReferenceArea
+                    y1={upperRed}
+                    fill="#ef4444"
+                    fillOpacity={0.10}
+                    ifOverflow="hidden"
+                  />
+                )}
+                {activeBaseline && lowerRed !== null && lowerRed > 0 && (
+                  <ReferenceArea
+                    y2={lowerRed}
+                    fill="#ef4444"
+                    fillOpacity={0.10}
+                    ifOverflow="hidden"
+                  />
+                )}
+
                 {activeBaseline && (
                   <ReferenceLine
                     y={activeBaseline.mean}

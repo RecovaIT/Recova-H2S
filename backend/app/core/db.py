@@ -18,6 +18,7 @@ engine = create_engine(
     pool_size=10,
     max_overflow=20,
     future=True,
+    connect_args={"connect_timeout": 5},
 )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, class_=Session)

@@ -10,7 +10,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 os.environ["ENVIRONMENT"] = "test"
-os.environ["DATABASE_URL"] = "postgresql+psycopg://recova:recova@127.0.0.1:55432/recova_test"
+os.environ["DATABASE_URL"] = os.environ.get(
+    "TEST_DATABASE_URL",
+    os.environ.get("DATABASE_URL", "postgresql+psycopg://recova:recova@127.0.0.1:5432/recova_test"),
+)
 os.environ["SECRET_KEY"] = "test-secret-key-for-pytest-only-00000000000000"
 os.environ["COOKIE_SECURE"] = "false"
 os.environ["RUN_EMBEDDED_WORKER"] = "false"

@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Activity, Building2, CheckSquare, ShieldCheck } from "lucide-react";
+import { Activity, Building2, CheckSquare, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import type { BootstrapPayload } from "@/services/auth";
 import { Alert } from "@/components/ui/alert";
@@ -43,6 +43,7 @@ export function OrganizationOnboardingCard({ mode }: { mode: "bootstrap" | "regi
   const [license, setLicense] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,10 +75,10 @@ export function OrganizationOnboardingCard({ mode }: { mode: "bootstrap" | "regi
       setError("Select at least one enabled application track.");
       return;
     }
-    const cleanSlug = orgSlug.trim().toLowerCase();
+    let cleanSlug = (orgSlug || slugifyOrgName(orgName)).trim().toLowerCase();
     if (!/^[a-z0-9-]{2,80}$/.test(cleanSlug)) {
-      setError("Organisation slug must be 2–80 lowercase letters, numbers, or hyphens.");
-      return;
+      const sanitized = cleanSlug.replace(/[^a-z0-9-]/g, "");
+      cleanSlug = sanitized.length >= 2 ? sanitized.slice(0, 80) : `org-${Date.now().toString(36)}`;
     }
 
     const payload: BootstrapPayload = {
@@ -136,7 +137,7 @@ export function OrganizationOnboardingCard({ mode }: { mode: "bootstrap" | "regi
                 Organisation Profile
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-3">
                 <div className="space-y-1">
                   <Label htmlFor="org-name">Organisation Name</Label>
                   <Input
@@ -149,16 +150,12 @@ export function OrganizationOnboardingCard({ mode }: { mode: "bootstrap" | "regi
                     onChange={(e) => handleOrgNameChange(e.target.value)}
                   />
                 </div>
-                <div className="space-y-1">
+
+                {/* Tenant slug is automatically generated and invisible on the form */}
+                <div className="sr-only">
                   <Label htmlFor="org-slug">Tenant Slug</Label>
                   <Input
                     id="org-slug"
-                    required
-                    minLength={2}
-                    maxLength={80}
-                    pattern="[a-z0-9-]+"
-                    placeholder="abu-dhabi-wellness"
-                    className="font-mono text-xs"
                     value={orgSlug}
                     onChange={(e) => handleSlugChange(e.target.value)}
                   />
@@ -253,15 +250,27 @@ export function OrganizationOnboardingCard({ mode }: { mode: "bootstrap" | "regi
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="admin-password">Password (min 10 characters)</Label>
-                  <Input
-                    id="admin-password"
-                    type="password"
-                    required
-                    minLength={10}
-                    maxLength={128}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
+                  <div className="relative">
+                    <Input
+                      id="admin-password"
+                      type={showPassword ? "text" : "password"}
+                      required
+                      minLength={10}
+                      maxLength={128}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+                      aria-label={showPassword ? "Hide input" : "Reveal input"}
+                      title={showPassword ? "Hide input" : "Reveal input"}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

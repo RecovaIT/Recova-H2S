@@ -48,7 +48,7 @@ describe("LoginPage & Tenant Onboarding", () => {
   });
 
   it("submits OrganizationOnboardingCard in register mode and redirects to /dashboard", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     vi.mocked(authService.registerOrganization).mockResolvedValue({
       user: {
         id: "u1",
@@ -103,7 +103,7 @@ describe("LoginPage & Tenant Onboarding", () => {
   });
 
   it("remounts AuthGuard children when active organisation switches", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const baseUser = {
       id: "u1",
       email: "admin@hub.ae",

@@ -2,7 +2,7 @@
 
 import React, { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Shield, Users } from "lucide-react";
+import { Eye, EyeOff, Shield, Users } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { opsService } from "@/services/ops";
 import type {
@@ -59,6 +59,7 @@ function AdminPageContent() {
   const [uRole, setURole] = useState("clinician");
   const [uPassword, setUPassword] = useState("");
   const [uLicense, setULicense] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   // Role permission override form
   const [ovRole, setOvRole] = useState("supervisor");
@@ -150,9 +151,19 @@ function AdminPageContent() {
     e.preventDefault();
     setBusy(true);
     try {
+      const derivedSlug =
+        (
+          orgSlug.trim() ||
+          orgName
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, "")
+        ) || `tenant-${Math.floor(Math.random() * 10000)}`;
+
       await opsService.createOrganization({
         name: orgName.trim(),
-        slug: orgSlug.trim().toLowerCase(),
+        slug: derivedSlug,
         org_type: orgType,
         enabled_tracks: ["core", "loop", "neuro", "worksafe"] as Track[],
       });
@@ -235,8 +246,30 @@ function AdminPageContent() {
                       <Input value={uLicense} onChange={(e) => setULicense(e.target.value)} />
                     </div>
                     <div className="space-y-1 sm:col-span-4">
-                      <Label>Initial Password (min 10 chars)</Label>
-                      <Input type="password" required minLength={10} value={uPassword} onChange={(e) => setUPassword(e.target.value)} />
+                      <Label htmlFor="admin-user-password">Initial Password (min 10 chars)</Label>
+                      <div className="relative">
+                        <Input
+                          id="admin-user-password"
+                          type={showPassword ? "text" : "password"}
+                          required
+                          minLength={10}
+                          value={uPassword}
+                          onChange={(e) => setUPassword(e.target.value)}
+                          className="pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((prev) => !prev)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700 focus:outline-none"
+                          aria-label={showPassword ? "Hide input" : "Reveal input"}
+                        >
+                          {showPassword ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
                     </div>
                     <Button type="submit" disabled={busy} className="sm:col-span-2">Create User</Button>
                   </form>
@@ -357,7 +390,7 @@ function AdminPageContent() {
                 <CardContent>
                   <form onSubmit={handleCreateOrg} className="flex flex-wrap items-end gap-3">
                     <Input required value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="Organisation Name" className="w-64" />
-                    <Input required pattern="[a-z0-9-]+" value={orgSlug} onChange={(e) => setOrgSlug(e.target.value)} placeholder="slug-id" className="w-44" />
+                    <Input pattern="[a-z0-9-]*" value={orgSlug} onChange={(e) => setOrgSlug(e.target.value)} placeholder="slug (optional)" className="w-44" />
                     <Select value={orgType} onChange={(e) => setOrgType(e.target.value)} className="w-40">
                       <option value="hospital">Hospital</option>
                       <option value="clinic">Clinic</option>

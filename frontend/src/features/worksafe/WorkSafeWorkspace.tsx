@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { Building2, Droplets, HardHat, Mic, ShieldCheck, ThermometerSun } from "lucide-react";
+import { Building2, Droplets, HardHat, Mic, MicOff, ShieldCheck, ThermometerSun } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { careService } from "@/services/care";
 import { engineService } from "@/services/engine";
@@ -28,6 +28,15 @@ import { AgentExecutionGraph } from "@/components/AgentExecutionGraph";
 import { StatusBadge } from "@/components/RiskBadge";
 import { formatDateTime, formatLabel } from "@/lib/utils";
 
+interface SpeechRecognitionLike {
+  lang: string;
+  interimResults: boolean;
+  onresult: ((ev: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
 export function WorkSafeWorkspace() {
   const { hasPermission } = useAuth();
   const { pushToast } = useToast();
@@ -53,6 +62,7 @@ export function WorkSafeWorkspace() {
   const [shiftHours, setShiftHours] = useState("6");
   const [coreTemp, setCoreTemp] = useState("37.0");
   const [voiceNote, setVoiceNote] = useState("");
+  const [dictating, setDictating] = useState(false);
 
   // Workplace & Department creation
   const [wpName, setWpName] = useState("");
@@ -139,6 +149,29 @@ export function WorkSafeWorkspace() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const startSpeechDictation = () => {
+    const win = window as unknown as {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    };
+    const Ctor = win.SpeechRecognition || win.webkitSpeechRecognition;
+    if (!Ctor) {
+      pushToast("Speech recognition unavailable in this browser; please type shift note.", "info");
+      return;
+    }
+    const rec = new Ctor();
+    const currentWorker = workers.find((w) => w.id === workerId);
+    rec.lang = currentWorker?.preferred_language === "ar" ? "ar-AE" : "en-US";
+    rec.interimResults = false;
+    setDictating(true);
+    rec.onresult = (ev) => {
+      const spoken = ev.results[0]?.[0]?.transcript || "";
+      setVoiceNote((prev) => (prev ? `${prev} ${spoken}` : spoken));
+    };
+    rec.onend = () => setDictating(false);
+    rec.start();
   };
 
   const handleCreateWorkplace = async (e: React.FormEvent) => {
@@ -325,9 +358,21 @@ export function WorkSafeWorkspace() {
                 </div>
 
                 <div className="space-y-1">
-                  <Label className="flex items-center gap-1.5">
-                    <Mic className="h-3.5 w-3.5" /> Optional Voice / Shift Note
-                  </Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="flex items-center gap-1.5">
+                      <Mic className="h-3.5 w-3.5 text-slate-500" /> Optional Voice / Shift Note
+                    </Label>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={dictating ? "destructive" : "outline"}
+                      onClick={startSpeechDictation}
+                      className="h-7 text-xs flex items-center gap-1.5"
+                    >
+                      {dictating ? <MicOff className="h-3 w-3" /> : <Mic className="h-3 w-3" />}
+                      {dictating ? "Listening..." : "Voice Dictate"}
+                    </Button>
+                  </div>
                   <Textarea value={voiceNote} onChange={(e) => setVoiceNote(e.target.value)} placeholder="Quick note (heat stress, PPE discomfort, chest tightness)..." />
                 </div>
 

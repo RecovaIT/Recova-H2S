@@ -3,6 +3,7 @@
 import React, { Suspense, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { Eye, EyeOff } from "lucide-react";
 import { authService } from "@/services/auth";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ function ResetPasswordInner() {
   const sp = useSearchParams();
   const [token, setToken] = useState(sp.get("token") || "");
   const [newPassword, setNewPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -47,8 +49,27 @@ function ResetPasswordInner() {
         <Input required value={token} onChange={(e) => setToken(e.target.value)} />
       </div>
       <div className="space-y-1">
-        <Label>New Strong Password (min 10 chars)</Label>
-        <Input type="password" required minLength={10} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+        <Label htmlFor="reset-new-password">New Strong Password (min 10 chars)</Label>
+        <div className="relative">
+          <Input
+            id="reset-new-password"
+            type={showPassword ? "text" : "password"}
+            required
+            minLength={10}
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            className="pr-10"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((prev) => !prev)}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+            aria-label={showPassword ? "Hide input" : "Reveal input"}
+            title={showPassword ? "Hide input" : "Reveal input"}
+          >
+            {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+        </div>
       </div>
       <Button type="submit" disabled={busy} className="w-full">
         {busy ? "Updating..." : "Set New Password"}
