@@ -1,0 +1,18 @@
+# Recova | One engine, four care programmes
+CEO pitch | Future Health Digital Innovation Challenge | 18 November 2026
+
+One shared Recova Engine runs six gated stages: consent, emergency screening, aggregation, deterministic scoring, optional AI explanation and referral orchestration.
+Four programme experiences support relapse prevention (Core), population-health follow-up (Loop / IFHAS), cognitive wellness (Neuro) and workforce wellbeing (WorkSafe), with enrolment-led access on one platform.
+
+| Judging pillar | What Recova does and where to show it |
+| --- | --- |
+| Health Impact | Recova connects concerning changes to clinician review and tracked follow-up; show Core patient detail, Clinical Review and Referrals, without claiming proven improvements in patient outcomes. |
+| Technical Depth | Six gated stages keep emergency checks and deterministic risk calculations separate from optional generative explanation; show Agents, the Agent 4 signal matrix and the separate Agent 5 provider status or draft. |
+| Working Solution | Programme-specific staff experiences and a mobile patient portal use a shared API and database; show onboarding, a selected programme workspace, and a patient check-in saved through /portal. |
+| Responsible AI | Consent gates, visible data limitations and clinician review constrain routine processing and AI drafts; show patient consent, blocked processing and the review decision record. |
+| Scalability | Organisation-scoped access and shared services support multiple care programmes, with an integration path through FHIR-oriented exports; show tenant roles and the FHIR structural validator, without claiming certified interoperability. |
+| Commercial Viability | A clinic-led future feasibility pilot will test whether flags lead to completed follow-up before commercial expansion; show the proposed pilot plan and distinguish intended buyers from contracted customers. |
+
+Proposed demo order: Case D crisis bypass (BM-CORE-04), Case B drift (BM-CORE-02), Neuro presbycusis (BM-NEURO-02), then Benchmarks. Asiyah and the team must confirm this order during rehearsal.
+
+Release basis: main integrates Doctware and abdul-h2s; the earlier brain prototype is retained as historical reference. Show only features verified in the submitted deployment. Device-provider connections, government integration and clinical effectiveness are not demonstrated by local tests. Synthetic benchmark results are engineering checks, not clinical validation.

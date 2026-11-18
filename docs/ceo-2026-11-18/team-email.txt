@@ -1,0 +1,17 @@
+Subject: Recova submission pack: pitch, future pilot plan, governance review and demo runbook
+
+Hi team,
+
+Our competition registration is complete. We will submit from main after integrating the team branches and verifying the deployed release.
+
+Attached is the CEO execution pack: the six-pillar pitch, proposed future pilot, governance claim review, timed demo narration and final submission checklist. The pilot is a future feasibility plan; we have no active pilot or confirmed clinic agreement.
+
+Please read the pitch and confirm the proposed demo order: Case D crisis bypass, Case B drift, Neuro presbycusis, then Benchmarks, with a short mobile patient check-in demonstration. Asiyah, please coordinate the final narrative and record agreement. Yusuf, please provide the judge-accessible release URL and deployed main revision. Engineering owners, please address or explicitly disclose the governance findings before we record.
+
+The video must use actual release behaviour, label synthetic cases clearly and avoid unsupported clinical, regulatory, integration or commercial claims. The pack includes a ready-to-rehearse narration script. We aim to complete submission on the evening of 19 November, retaining 20 November as a buffer; check the official portal for the exact cutoff.
+
+Final CEO sign-off follows deployment verification and review of the complete video and submission materials.
+
+Abdulbasit
+
+Sending note: attach Recova-CEO-Execution-Pack-2026-11-18.pdf. Add the verified deployment URL and release SHA before sending. No email has been sent automatically.

@@ -57,7 +57,8 @@ export default function AuthorityPage() {
   }, []);
 
   useEffect(() => {
-    void loadNotices();
+    const timer = setTimeout(() => { void loadNotices(); }, 0);
+    return () => clearTimeout(timer);
   }, [loadNotices]);
 
   const toggleProgramme = (prog: string) => {

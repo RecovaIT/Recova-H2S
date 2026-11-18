@@ -10,6 +10,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import AuthContext, requires
+from app.agents.gate1_consent import evaluate_consents
+from app.models.base import utcnow
 from app.benchmarks.runner import create_benchmark_run, execute_benchmark_run
 from app.benchmarks.suites import BENCHMARK_SUITE, SUITE_NAME, SUITE_VERSION
 from app.core.errors import Forbidden, NotFound
@@ -140,10 +142,9 @@ def export_patient_fhir_bundle(
             select(Consent).where(Consent.organization_id == ctx.org_id, Consent.patient_id == patient.id).order_by(Consent.effective_at.desc())
         ).all()
     )
-    # Enforce HIE consent if patient explicitly revoked it
-    revoked_hie = any(c.scope == ConsentScope.HIE_SHARING.value and c.status != ConsentStatus.GRANTED.value for c in consents)
-    if revoked_hie:
-        raise Forbidden("Patient has revoked HIE/FHIR sharing consent")
+    active, _ = evaluate_consents(ctx.db, patient, utcnow())
+    if ConsentScope.HIE_SHARING.value not in active:
+        raise Forbidden("Active HIE/FHIR sharing consent is required")
 
     observations = list(
         ctx.db.scalars(

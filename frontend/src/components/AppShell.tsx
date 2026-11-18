@@ -78,7 +78,7 @@ export function AppShell({
   }, [loadShellAlerts]);
 
   const { connected } = useRealtimeEvents(Boolean(session && hasPermission("pipeline:read")), (ev) => {
-    if (ev.type === "pipeline.emergency") {
+    if (ev.type === "pipeline.emergency" || ev.type === "pipeline.emergency_bypass") {
       pushToast("Emergency Gate 2 Triggered", "error", "Routine pipeline bypassed — urgent triage required.");
       void loadShellAlerts();
     } else if (ev.type === "emergency.resolved" || ev.type === "referral.updated") {

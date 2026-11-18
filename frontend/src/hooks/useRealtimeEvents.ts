@@ -50,6 +50,10 @@ export function useRealtimeEvents(
     const eventNames = [
       "connected",
       "pipeline.started",
+      "agent.step_started",
+      "agent.step_finished",
+      "pipeline.finished",
+      "pipeline.emergency_bypass",
       "pipeline.step",
       "pipeline.completed",
       "pipeline.blocked",

@@ -1,0 +1,10 @@
+# Proposed future pilot | Recovery follow-up
+Submission-ready commercial outline | Planning assumptions, not an active pilot
+
+Recova has no active pilot. After the competition, seek one outpatient or rehabilitation clinic with an existing Recovery cohort. Clinics are intended B2B purchasers; B2G expansion could later involve a health authority such as ADPHC. No partner, endorsement or sale is confirmed.
+
+Start only after securing a clinical lead, follow-up coordinator, appropriate approvals, privacy review, data agreement and budget. Plan two to four weeks for readiness after a partner agrees; approvals may take longer. Then consider an eight-week feasibility window for up to 20 consenting adults: one week of setup, five of enrolment/monitoring, two of follow-up reconciliation. These are adjustable planning assumptions.
+
+Primary measure: participants completing documented clinician-approved follow-up within 14 calendar days of their first qualifying routine flag, divided by participants whose first flag has a complete 14-day observation window. Count each once; show missed, unknown, withdrawn and immature-window cases separately. Emergencies follow the clinic's immediate safety protocol and are reviewed separately.
+
+Use synthetic rehearsal first. Proceed only when consent/security checks pass and staff can manage alerts. Review safety, workload and completion before extending. This assesses workflow feasibility, not clinical efficacy. No price, market size, savings or outcome target is asserted; funding and pricing require partner discovery.
