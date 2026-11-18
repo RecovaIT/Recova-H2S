@@ -5,6 +5,7 @@ export interface BootstrapPayload {
   organization_name: string;
   organization_slug: string;
   org_type: "clinic" | "rehab_center" | "public_health" | "employer" | "hospital";
+  primary_programme?: string;
   enabled_tracks: string[];
   admin_email: string;
   admin_full_name: string;

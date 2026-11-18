@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.auth import router as auth_router
+from app.api.v1.authority import authority_router, notices_router
 from app.api.v1.care import (
     interventions_router,
     notifications_router,
@@ -55,5 +56,7 @@ for r in [
     settings_router,
     reports_router,
     portal_router,
+    notices_router,
+    authority_router,
 ]:
     api_v1_router.include_router(r)

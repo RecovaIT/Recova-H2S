@@ -88,6 +88,56 @@ def enroll_patient(patient_id: uuid.UUID, req: EnrollmentCreate, ctx: AuthContex
     return pat_svc.enroll_track(ctx, patient_id, req)
 
 
+@patients_router.post("/{patient_id}/portal-invitations", status_code=201)
+def create_portal_invitation(
+    patient_id: uuid.UUID,
+    recipient_email: str = Query(..., min_length=5, max_length=320),
+    ctx: AuthContext = Depends(requires(P.PATIENTS_WRITE)),
+):
+    """Issue a single-use, expiring, recipient-bound portal invitation (stored as token hash)."""
+    from datetime import timedelta
+    from app.core.security import hash_token, new_token
+    from app.models.base import utcnow
+    from app.models.identity import PortalInvitation
+
+    detail = pat_svc.get_patient(ctx, patient_id)
+    now = utcnow()
+    # Invalidate any prior unused invitations for this patient
+    prior = ctx.db.scalars(
+        select(PortalInvitation).where(
+            PortalInvitation.patient_id == detail.id,
+            PortalInvitation.organization_id == ctx.org_id,
+            PortalInvitation.accepted_at.is_(None),
+            PortalInvitation.revoked_at.is_(None),
+        )
+    ).all()
+    for inv in prior:
+        inv.revoked_at = now
+
+    raw_token = new_token(32)
+    expires_at = now + timedelta(hours=72)
+    inv = PortalInvitation(
+        organization_id=ctx.org_id,
+        patient_id=detail.id,
+        recipient_email=recipient_email.strip().lower(),
+        token_hash=hash_token(raw_token),
+        purpose="portal_link",
+        expires_at=expires_at,
+        created_by_id=ctx.user.id,
+    )
+    ctx.db.add(inv)
+    ctx.db.flush()
+    ctx.audit("patient.portal_invitation.issue", "portal_invitation", inv.id, details={"patient_id": str(detail.id)})
+    ctx.db.commit()
+    return {
+        "invitation_id": str(inv.id),
+        "patient_id": str(detail.id),
+        "recipient_email": inv.recipient_email,
+        "expires_at": inv.expires_at,
+        "invitation_token": raw_token,
+    }
+
+
 @patients_router.get("/{patient_id}/passport")
 def get_family_health_passport(patient_id: uuid.UUID, ctx: AuthContext = Depends(requires(P.PATIENTS_READ))):
     """Recova Loop Family Health Passport: unified longitudinal screening, insurance & referral summary."""

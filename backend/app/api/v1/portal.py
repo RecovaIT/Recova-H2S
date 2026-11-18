@@ -101,6 +101,41 @@ def overview(ctx: AuthContext = Depends(requires(P.PORTAL_SELF))):
         )
     )
     scopes, _ = evaluate_consents(ctx.db, patient, utcnow())
+    from app.models.ops import NoticeAcknowledgement, PublicHealthNotice
+
+    now = utcnow()
+    live_notices = list(
+        ctx.db.scalars(
+            select(PublicHealthNotice)
+            .where(PublicHealthNotice.status == "published")
+            .order_by(PublicHealthNotice.published_at.desc())
+        )
+    )
+    acked_live = set(
+        str(nid)
+        for nid in ctx.db.scalars(
+            select(NoticeAcknowledgement.notice_id).where(NoticeAcknowledgement.user_id == ctx.user.id)
+        )
+    )
+    merged_notices = list(enrollment.context.get("portal_notices", []))
+    for n in live_notices:
+        if n.expires_at and n.expires_at < now:
+            continue
+        if n.scope_emirate and ctx.organization.emirate and n.scope_emirate.lower() != ctx.organization.emirate.lower():
+            continue
+        if n.eligible_programmes and enrollment.track not in n.eligible_programmes:
+            continue
+        merged_notices.append(
+            {
+                "id": str(n.id),
+                "title": n.title,
+                "body": n.message,
+                "issuer": n.issuer,
+                "severity": n.severity,
+            }
+        )
+    merged_ack = list(dict.fromkeys(list(enrollment.context.get("portal_acknowledged", [])) + list(acked_live)))
+
     return {
         "name": patient.given_name,
         "track": enrollment.track,
@@ -108,8 +143,8 @@ def overview(ctx: AuthContext = Depends(requires(P.PORTAL_SELF))):
         "synthetic": patient.is_synthetic,
         "scenario": enrollment.context.get("scenario"),
         "care": enrollment.context.get("portal_care", []),
-        "notices": enrollment.context.get("portal_notices", []),
-        "acknowledged": enrollment.context.get("portal_acknowledged", []),
+        "notices": merged_notices,
+        "acknowledged": merged_ack,
         "consents": sorted(scopes),
         "observations": [
             {

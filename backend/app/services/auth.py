@@ -86,14 +86,28 @@ def _create_org_and_admin_session(
     *,
     is_platform_admin: bool,
     audit_action: str,
+    enforce_single_programme: bool = False,
     ip_address: str | None = None,
     user_agent: str | None = None,
 ) -> tuple[SessionResponse, str, str]:
     problems = validate_password_strength(req.admin_password)
     if problems:
         raise ValidationFailed("; ".join(problems))
-    if not req.enabled_tracks:
-        raise ValidationFailed("Select at least one application track")
+
+    if enforce_single_programme:
+        if req.primary_programme is not None:
+            resolved_tracks = [req.primary_programme.value]
+            primary_prog = req.primary_programme.value
+        elif len(req.enabled_tracks) == 1:
+            resolved_tracks = [req.enabled_tracks[0].value]
+            primary_prog = req.enabled_tracks[0].value
+        else:
+            raise ValidationFailed("Select exactly one primary programme during organisation registration.")
+    else:
+        if not req.enabled_tracks:
+            raise ValidationFailed("Select at least one application track")
+        resolved_tracks = [t.value for t in req.enabled_tracks]
+        primary_prog = req.primary_programme.value if req.primary_programme else resolved_tracks[0]
 
     slug = req.organization_slug.strip().lower()
     email = req.admin_email.strip().lower()
@@ -107,7 +121,9 @@ def _create_org_and_admin_session(
         name=req.organization_name.strip(),
         slug=slug,
         org_type=req.org_type,
-        enabled_tracks=[t.value for t in req.enabled_tracks],
+        primary_programme=primary_prog,
+        programme_configuration_status="configured",
+        enabled_tracks=resolved_tracks,
         country="UAE",
         emirate="Abu Dhabi",
         data_retention_days=2555,
@@ -188,6 +204,7 @@ def register_organization(
         req,
         is_platform_admin=False,
         audit_action="organization.register",
+        enforce_single_programme=True,
         ip_address=ip_address,
         user_agent=user_agent,
     )

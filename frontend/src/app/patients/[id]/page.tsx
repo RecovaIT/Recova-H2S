@@ -2,8 +2,9 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { FileCode2, Play, RotateCcw, ShieldCheck } from "lucide-react";
+import { FileCode2, MailPlus, Play, RotateCcw, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { api } from "@/lib/api";
 import { engineService } from "@/services/engine";
 import { patientsService } from "@/services/patients";
 import { signalsService } from "@/services/signals";
@@ -183,6 +184,27 @@ export default function PatientDetailPage() {
     }
   };
 
+  const handleIssuePortalInvite = async () => {
+    const email = window.prompt("Enter participant recipient email for the 72h portal invitation:");
+    if (!email || !email.includes("@")) {
+      if (email !== null) {
+        pushToast("Valid email required", "error", "Enter a valid recipient email to bind the portal invitation.");
+      }
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await api.post<{ invitation_token: string; expires_at: string }>(
+        `/patients/${patientId}/portal-invitations?recipient_email=${encodeURIComponent(email)}`
+      );
+      pushToast("Portal invitation issued (72h expiry)", "success", `Token: ${res.invitation_token.slice(0, 12)}…`);
+    } catch (err) {
+      pushToast("Could not issue invitation", "error", err instanceof Error ? err.message : undefined);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const fullName = patient ? `${patient.given_name} ${patient.family_name}` : "Participant Chart";
 
   return (
@@ -192,6 +214,11 @@ export default function PatientDetailPage() {
         subtitle={patient ? `MRN ${patient.mrn} · ${formatLabel(patient.participant_type)} · Registered ${formatDate(patient.created_at)}` : "Loading chart..."}
         actions={
           <div className="flex flex-wrap gap-2">
+            {hasPermission("patients:write") && patient && (
+              <Button size="sm" variant="outline" onClick={() => void handleIssuePortalInvite()} disabled={busy}>
+                <MailPlus className="h-4 w-4" /> Issue Portal Invite
+              </Button>
+            )}
             {hasPermission("fhir:export") && patient && (
               <Button size="sm" variant="outline" onClick={() => setFhirOpen(true)}>
                 <FileCode2 className="h-4 w-4" /> FHIR R4 Bundle

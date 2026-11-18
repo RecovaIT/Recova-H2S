@@ -109,6 +109,12 @@ const NAVIGATION_GROUPS = [
         icon: GitBranch,
         permission: "referrals:read",
       },
+      {
+        href: "/authority",
+        label: "Public-health notices",
+        icon: Radio,
+        permission: "org:read",
+      },
     ],
   },
   {
@@ -302,12 +308,19 @@ export function AppSidebar({
       .slice(0, 2)
       .map((part) => part[0])
       .join("") || "R";
+  const primaryProgramme = session?.active_organization?.primary_programme;
+  const isPlatformAdmin = Boolean(session?.user?.is_platform_admin);
   const groups = NAVIGATION_GROUPS.map((group) => ({
     ...group,
     items: (group.items as NavigationItem[]).filter(
       (item) =>
         hasPermission(item.permission) &&
-        (!item.track || hasTrack(item.track)) &&
+        (!item.track ||
+          (isPlatformAdmin
+            ? hasTrack(item.track)
+            : primaryProgramme && (session?.active_organization?.enabled_tracks?.length ?? 0) <= 1
+            ? item.track === primaryProgramme
+            : hasTrack(item.track))) &&
         (collapsed ||
           item.label.toLowerCase().includes(query.trim().toLowerCase())),
     ),

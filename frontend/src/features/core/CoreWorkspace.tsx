@@ -28,6 +28,7 @@ import { ClosedLoopReferralTracker } from "@/components/ClosedLoopReferralTracke
 import { DecideAiReviewWorkspace } from "@/components/DecideAiReviewWorkspace";
 import { LongitudinalTrendChart } from "@/components/LongitudinalTrendChart";
 import { RiskBadge } from "@/components/RiskBadge";
+import { SubEngineSummaryBanner } from "@/components/SubEngineSummaryBanner";
 
 const CORE_SYMPTOMS = [
   "craving_spike",
@@ -251,6 +252,7 @@ export function CoreWorkspace() {
 
   return (
     <div className="space-y-6">
+      <SubEngineSummaryBanner track="core" />
       {/* Patient Selector Bar */}
       <Card>
         <CardContent className="flex flex-wrap items-center justify-between gap-4 pt-5">

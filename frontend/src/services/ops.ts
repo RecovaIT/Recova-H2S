@@ -10,6 +10,8 @@ import type {
   Organization,
   OverviewReport,
   Page,
+  PlatformOverviewReport,
+  ProgrammeRequest,
   ReferralPathway,
   RolePermissionView,
   Track,
@@ -199,5 +201,27 @@ export const opsService = {
 
   testIntegration(name: string): Promise<Record<string, unknown>> {
     return api.post(`/settings/integrations/${name}/test`);
+  },
+
+  getPlatformOverview(): Promise<PlatformOverviewReport> {
+    return api.get("/reports/platform-overview");
+  },
+
+  listProgrammeRequests(): Promise<ProgrammeRequest[]> {
+    return api.get("/organizations/programme-requests");
+  },
+
+  createProgrammeRequest(payload: {
+    requested_programme: Track;
+    justification: string;
+  }): Promise<ProgrammeRequest> {
+    return api.post("/organizations/programme-requests", payload);
+  },
+
+  reviewProgrammeRequest(
+    requestId: string,
+    payload: { decision: "approved" | "rejected"; review_note?: string }
+  ): Promise<ProgrammeRequest> {
+    return api.post(`/organizations/programme-requests/${requestId}/review`, payload);
   },
 };

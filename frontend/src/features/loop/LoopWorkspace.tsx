@@ -28,6 +28,7 @@ import { AgentExecutionGraph } from "@/components/AgentExecutionGraph";
 import { ClosedLoopReferralTracker } from "@/components/ClosedLoopReferralTracker";
 import { DecideAiReviewWorkspace } from "@/components/DecideAiReviewWorkspace";
 import { RiskBadge, StatusBadge } from "@/components/RiskBadge";
+import { SubEngineSummaryBanner } from "@/components/SubEngineSummaryBanner";
 import { formatDateTime, formatLabel, formatRelativeCountdown } from "@/lib/utils";
 
 const PHQ9_QUESTIONS = [
@@ -177,6 +178,7 @@ export function LoopWorkspace() {
 
   return (
     <div className="space-y-6">
+      <SubEngineSummaryBanner track="loop" />
       <Card>
         <CardContent className="flex flex-wrap items-center justify-between gap-4 pt-5">
           <div className="flex flex-wrap items-center gap-3">

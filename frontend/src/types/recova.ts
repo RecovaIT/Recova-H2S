@@ -79,6 +79,8 @@ export interface Organization {
   name: string;
   slug: string;
   org_type: string;
+  primary_programme?: string | null;
+  programme_configuration_status?: string;
   enabled_tracks: string[];
   is_active: boolean;
   country?: string | null;
@@ -86,6 +88,55 @@ export interface Organization {
   settings: Record<string, unknown>;
   data_retention_days?: number | null;
   created_at: string;
+}
+
+export interface ProgrammeRequest {
+  id: string;
+  organization_id: string;
+  organization_name?: string | null;
+  requested_programme: Track;
+  justification: string;
+  status: "pending" | "approved" | "rejected";
+  requested_by_id?: string | null;
+  reviewed_by_id?: string | null;
+  reviewed_at?: string | null;
+  review_note?: string | null;
+  created_at: string;
+}
+
+export interface PlatformSubEngineCenter {
+  id: string;
+  name: string;
+  slug: string;
+  org_type: string;
+  emirate?: string | null;
+  primary_programme?: string | null;
+  active_patients: number;
+  staff_members: number;
+  total_runs: number;
+  open_emergencies: number;
+  risk_distribution: Record<string, number>;
+}
+
+export interface PlatformSubEngineSummary {
+  track: Track;
+  total_centers: number;
+  total_patients: number;
+  total_staff: number;
+  total_runs: number;
+  open_emergencies: number;
+  risk_distribution: Record<string, number>;
+  centers: PlatformSubEngineCenter[];
+}
+
+export interface PlatformOverviewReport {
+  total_centers: number;
+  total_active_patients: number;
+  total_staff_members: number;
+  total_pipeline_runs: number;
+  open_emergencies: number;
+  sub_engines: Record<Track, PlatformSubEngineSummary>;
+  agent_telemetry: Record<string, Record<string, number>>;
 }
 
 export interface Membership {

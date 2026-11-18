@@ -144,3 +144,55 @@ def password_reset_confirm(req: PasswordResetConfirm, request: Request, db: Sess
 def change_password(req: ChangePasswordRequest, ctx: AuthContext = Depends(get_auth_context)):
     auth_svc.change_password(ctx, req.current_password, req.new_password)
     return Message(message="Password changed")
+
+
+@router.post("/accept-portal-invitation", response_model=Message)
+def accept_portal_invitation(token: str, ctx: AuthContext = Depends(get_auth_context)):
+    """Verify a single-use, expiring, recipient-bound invitation and link Patient.portal_user_id."""
+    from sqlalchemy import select
+    from app.core.errors import Forbidden, NotFound, ValidationFailed
+    from app.core.security import hash_token
+    from app.models.base import utcnow
+    from app.models.clinical import Patient
+    from app.models.identity import Membership, PortalInvitation
+
+    now = utcnow()
+    inv = ctx.db.scalar(select(PortalInvitation).where(PortalInvitation.token_hash == hash_token(token.strip())))
+    if inv is None or inv.revoked_at is not None:
+        raise NotFound("Invalid or revoked portal invitation.")
+    if inv.expires_at < now:
+        raise ValidationFailed("Portal invitation has expired.")
+    if inv.recipient_email.lower() != ctx.user.email.lower():
+        raise Forbidden("This invitation is bound to a different recipient email.")
+
+    patient = ctx.db.get(Patient, inv.patient_id)
+    if patient is None:
+        raise NotFound("Linked participant record not found.")
+
+    if inv.accepted_at is None:
+        patient.portal_user_id = ctx.user.id
+        inv.accepted_at = now
+        existing_mem = ctx.db.scalar(
+            select(Membership).where(
+                Membership.user_id == ctx.user.id,
+                Membership.organization_id == inv.organization_id,
+            )
+        )
+        if existing_mem is None:
+            ctx.db.add(
+                Membership(
+                    user_id=ctx.user.id,
+                    organization_id=inv.organization_id,
+                    role="patient",
+                    is_active=True,
+                    department_ids=[],
+                )
+            )
+        ctx.audit(
+            "patient.portal_invitation.accept",
+            "portal_invitation",
+            inv.id,
+            details={"patient_id": str(patient.id), "organization_id": str(inv.organization_id)},
+        )
+        ctx.db.commit()
+    return Message(message="Portal invitation accepted and participant record linked.")

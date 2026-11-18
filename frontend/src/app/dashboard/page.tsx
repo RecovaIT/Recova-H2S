@@ -28,7 +28,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { engineService } from "@/services/engine";
 import { opsService } from "@/services/ops";
-import type { OverviewReport, PipelineRun } from "@/types/recova";
+import type { OverviewReport, PipelineRun, PlatformOverviewReport, Track } from "@/types/recova";
 import { cn, formatDateTime } from "@/lib/utils";
 import { AppShell } from "@/components/AppShell";
 import { AuthGuard } from "@/components/AuthGuard";
@@ -121,9 +121,13 @@ export default function DashboardPage() {
   const { session, hasPermission, hasTrack } = useAuth();
   const reduceMotion = useReducedMotion();
   const [overview, setOverview] = useState<OverviewReport | null>(null);
+  const [platformOverview, setPlatformOverview] = useState<PlatformOverviewReport | null>(null);
+  const [selectedSubEngine, setSelectedSubEngine] = useState<Track>("core");
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+
+  const isPlatformAdmin = Boolean(session?.user?.is_platform_admin);
 
   useEffect(() => {
     if (!session) return;
@@ -135,11 +139,15 @@ export default function DashboardPage() {
             .listRuns({ page: 1, page_size: 5 })
             .then((result) => result.items)
         : Promise.resolve([]),
+      session.user?.is_platform_admin
+        ? opsService.getPlatformOverview().catch(() => null)
+        : Promise.resolve(null),
     ])
-      .then(([result, recentRuns]) => {
+      .then(([result, recentRuns, platRes]) => {
         if (!active) return;
         setOverview(result);
         setRuns(recentRuns);
+        setPlatformOverview(platRes);
         setError(false);
       })
       .catch(() => {
@@ -153,7 +161,14 @@ export default function DashboardPage() {
     };
   }, [session, hasPermission]);
 
-  const tracks = TRACKS.filter((track) => hasTrack(track.key));
+  const primaryProgramme = session?.active_organization?.primary_programme;
+  const tracks = TRACKS.filter((track) => {
+    if (isPlatformAdmin) return hasTrack(track.key);
+    if (primaryProgramme && (session?.active_organization?.enabled_tracks?.length ?? 0) <= 1) {
+      return track.key === primaryProgramme;
+    }
+    return hasTrack(track.key);
+  });
   const chartData = tracks.map((track) => {
     const counts = overview?.track_risk_distribution[track.key] || {};
     return {
@@ -536,7 +551,7 @@ export default function DashboardPage() {
           <section aria-labelledby="pathways-title">
             <div className="mb-3 flex items-center justify-between">
               <h2 id="pathways-title" className="text-sm font-semibold">
-                Your care pathways
+                {isPlatformAdmin ? "Recova Sub-Engines" : "Your Registered Programme"}
               </h2>
               <span className="text-[10px] text-slate-500">
                 {tracks.length} active
@@ -566,8 +581,168 @@ export default function DashboardPage() {
                   <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform group-hover:translate-x-1" />
                 </Link>
               ))}
+              {!isPlatformAdmin && hasPermission("org:manage") && (
+                <Link
+                  href="/settings"
+                  className="pathway-link group border-dashed border-[#c4d7e2] bg-[#f8fbfc]"
+                >
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#d7e6ed] text-[#004263]">
+                    <Workflow className="h-[18px] w-[18px]" strokeWidth={1.6} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-xs font-semibold text-[#004263]">
+                      Request another engine
+                    </span>
+                    <span className="mt-1 block text-[10px] leading-relaxed text-slate-500">
+                      Submit an audited request to expand your center&apos;s programmes
+                    </span>
+                  </span>
+                  <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform group-hover:translate-x-1" />
+                </Link>
+              )}
             </div>
           </section>
+
+          {isPlatformAdmin && platformOverview && (
+            <section aria-labelledby="engine-command-title" className="space-y-4">
+              <Card className="dashboard-panel">
+                <CardHeader className="flex-row flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <CardTitle id="engine-command-title">
+                      Recova Overall Engine — 4 Sub-Dashboards &amp; Customer Centers
+                    </CardTitle>
+                    <CardDescription className="mt-1">
+                      {platformOverview.total_centers} active centers ·{" "}
+                      {platformOverview.total_active_patients} participants ·{" "}
+                      {platformOverview.total_staff_members} staff users ·{" "}
+                      {platformOverview.total_pipeline_runs} total runs
+                    </CardDescription>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Sub-engine dashboards">
+                    {TRACKS.map((trk) => {
+                      const active = selectedSubEngine === trk.key;
+                      return (
+                        <button
+                          key={trk.key}
+                          type="button"
+                          role="tab"
+                          aria-selected={active}
+                          onClick={() => setSelectedSubEngine(trk.key as Track)}
+                          className={cn(
+                            "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors",
+                            active
+                              ? "bg-[#003e5e] text-[#aeff9a]"
+                              : "bg-[#f0f6f9] text-[#2a4558] hover:bg-[#d7e6ed]"
+                          )}
+                        >
+                          {trk.name} ({platformOverview.sub_engines[trk.key as Track]?.total_centers ?? 0})
+                        </button>
+                      );
+                    })}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {(() => {
+                    const sub = platformOverview.sub_engines[selectedSubEngine];
+                    const meta = TRACKS.find((t) => t.key === selectedSubEngine);
+                    if (!sub) return null;
+                    return (
+                      <>
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                          <div className="rounded-xl border border-[#e2edf2] bg-[#f8fbfc] p-3">
+                            <p className="text-[10px] font-medium text-[#5a7d93]">Centers</p>
+                            <p className="mt-1 text-xl font-semibold tabular-nums text-[#011621]">{sub.total_centers}</p>
+                          </div>
+                          <div className="rounded-xl border border-[#e2edf2] bg-[#f8fbfc] p-3">
+                            <p className="text-[10px] font-medium text-[#5a7d93]">Participants</p>
+                            <p className="mt-1 text-xl font-semibold tabular-nums text-[#011621]">{sub.total_patients}</p>
+                          </div>
+                          <div className="rounded-xl border border-[#e2edf2] bg-[#f8fbfc] p-3">
+                            <p className="text-[10px] font-medium text-[#5a7d93]">Staff Users</p>
+                            <p className="mt-1 text-xl font-semibold tabular-nums text-[#011621]">{sub.total_staff}</p>
+                          </div>
+                          <div className="rounded-xl border border-[#e2edf2] bg-[#f8fbfc] p-3">
+                            <p className="text-[10px] font-medium text-[#5a7d93]">Engine Runs</p>
+                            <p className="mt-1 text-xl font-semibold tabular-nums text-[#011621]">{sub.total_runs}</p>
+                          </div>
+                          <div className="rounded-xl border border-[#e2edf2] bg-[#f8fbfc] p-3">
+                            <p className="text-[10px] font-medium text-[#5a7d93]">Open Emergencies</p>
+                            <p className="mt-1 text-xl font-semibold tabular-nums text-[#ef4444]">{sub.open_emergencies}</p>
+                          </div>
+                        </div>
+
+                        {sub.centers.length === 0 ? (
+                          <EmptyState
+                            title={`No centers registered for ${meta?.title || selectedSubEngine}`}
+                            description="Centers selecting this primary programme during onboarding will appear here with their live metrics."
+                          />
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Customer Center</TableHead>
+                                <TableHead>Type / Emirate</TableHead>
+                                <TableHead>Participants</TableHead>
+                                <TableHead>Staff</TableHead>
+                                <TableHead>Runs</TableHead>
+                                <TableHead>Emergencies</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {sub.centers.map((center) => (
+                                <TableRow key={center.id}>
+                                  <TableCell className="text-xs font-semibold text-[#011621]">
+                                    {center.name}
+                                  </TableCell>
+                                  <TableCell className="text-xs text-[#5a7d93]">
+                                    {center.org_type} · {center.emirate || "UAE"}
+                                  </TableCell>
+                                  <TableCell className="text-xs font-medium tabular-nums">{center.active_patients}</TableCell>
+                                  <TableCell className="text-xs tabular-nums">{center.staff_members}</TableCell>
+                                  <TableCell className="text-xs tabular-nums">{center.total_runs}</TableCell>
+                                  <TableCell className="text-xs font-semibold tabular-nums text-[#ef4444]">
+                                    {center.open_emergencies}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        )}
+                      </>
+                    );
+                  })()}
+
+                  <div className="border-t border-[#e2edf2] pt-4">
+                    <div className="mb-2 flex items-center justify-between">
+                      <h3 className="text-xs font-semibold text-[#011621]">
+                        6-Agent Engine Telemetry (All Sub-Engines)
+                      </h3>
+                      <Link href="/agents" className="text-[11px] font-semibold text-[#003e5e] hover:underline">
+                        Open Agent Monitor →
+                      </Link>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+                      {Object.entries(platformOverview.agent_telemetry).map(([agentKey, counts]) => (
+                        <div key={agentKey} className="rounded-xl border border-[#e2edf2] bg-white p-3">
+                          <p className="truncate text-[10px] font-bold uppercase tracking-wider text-[#003e5e]">
+                            {agentKey.replace(/_/g, " ")}
+                          </p>
+                          <div className="mt-1.5 space-y-0.5 text-[11px] tabular-nums text-[#5a7d93]">
+                            {Object.entries(counts).map(([st, cnt]) => (
+                              <p key={st} className="flex justify-between">
+                                <span>{st}</span>
+                                <strong className="text-[#011621]">{cnt}</strong>
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </section>
+          )}
 
           {hasPermission("pipeline:read") && (
             <Card className="dashboard-panel">

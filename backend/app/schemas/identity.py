@@ -17,6 +17,8 @@ class OrganizationOut(ORMModel):
     name: str
     slug: str
     org_type: str
+    primary_programme: str | None = None
+    programme_configuration_status: str = "configured"
     enabled_tracks: list[str]
     is_active: bool
     country: str | None = None
@@ -78,11 +80,36 @@ class BootstrapRequest(BaseModel):
     organization_name: str = Field(min_length=2, max_length=200)
     organization_slug: str = Field(min_length=2, max_length=80, pattern=r"^[a-z0-9-]+$")
     org_type: Literal["clinic", "rehab_center", "public_health", "employer", "hospital"] = "hospital"
+    primary_programme: Track | None = None
     enabled_tracks: list[Track] = Field(default_factory=lambda: [Track.CORE, Track.LOOP, Track.NEURO, Track.WORKSAFE])
     admin_email: EmailStr
     admin_full_name: str = Field(min_length=2, max_length=200)
     admin_password: str = Field(min_length=10, max_length=128)
     admin_license_number: str | None = Field(default=None, max_length=80)
+
+
+class ProgrammeRequestCreate(BaseModel):
+    requested_programme: Track
+    justification: str = Field(min_length=10, max_length=1000)
+
+
+class ProgrammeRequestReview(BaseModel):
+    decision: Literal["approved", "rejected"]
+    review_note: str | None = Field(default=None, max_length=500)
+
+
+class ProgrammeRequestOut(ORMModel):
+    id: uuid.UUID
+    organization_id: uuid.UUID
+    organization_name: str | None = None
+    requested_programme: str
+    justification: str
+    status: str
+    requested_by_id: uuid.UUID | None = None
+    reviewed_by_id: uuid.UUID | None = None
+    reviewed_at: datetime | None = None
+    review_note: str | None = None
+    created_at: datetime
 
 
 class LoginRequest(BaseModel):

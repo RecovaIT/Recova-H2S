@@ -174,6 +174,21 @@ def test_public_organization_registration_isolation_and_conflicts(client):
     )
     assert locked.status_code == 409
 
+    # ONB02: Multiple tracks without single primary_programme are rejected with 422
+    multi_reg = client.post(
+        "/api/v1/auth/register-organization",
+        json={
+            "organization_name": "Multi Track Clinic",
+            "organization_slug": "multi-track-clinic",
+            "org_type": "clinic",
+            "enabled_tracks": ["core", "loop"],
+            "admin_email": "multi@dubaiclinic.ae",
+            "admin_full_name": "Dr. Tariq Saeed",
+            "admin_password": "DubaiClinicPass123!",
+        },
+    )
+    assert multi_reg.status_code == 422
+
     # Self-service tenant registration creates isolated org + org_admin (non-platform-admin) + cookies
     reg = client.post(
         "/api/v1/auth/register-organization",
@@ -181,7 +196,8 @@ def test_public_organization_registration_isolation_and_conflicts(client):
             "organization_name": "Dubai Care Clinic",
             "organization_slug": "dubai-clinic",
             "org_type": "clinic",
-            "enabled_tracks": ["core", "loop"],
+            "primary_programme": "core",
+            "enabled_tracks": ["core"],
             "admin_email": "admin@dubaiclinic.ae",
             "admin_full_name": "Dr. Tariq Saeed",
             "admin_password": "DubaiClinicPass123!",
@@ -193,7 +209,8 @@ def test_public_organization_registration_isolation_and_conflicts(client):
     assert body["user"]["is_platform_admin"] is False
     assert body["role"] == "org_admin"
     assert body["active_organization"]["slug"] == "dubai-clinic"
-    assert body["tracks"] == ["core", "loop"]
+    assert body["active_organization"]["primary_programme"] == "core"
+    assert body["tracks"] == ["core"]
     assert client.cookies.get("recova_session")
     assert client.cookies.get("recova_csrf")
 

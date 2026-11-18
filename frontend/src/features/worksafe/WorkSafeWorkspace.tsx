@@ -26,6 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
 import { AgentExecutionGraph } from "@/components/AgentExecutionGraph";
 import { StatusBadge } from "@/components/RiskBadge";
+import { SubEngineSummaryBanner } from "@/components/SubEngineSummaryBanner";
 import { formatDateTime, formatLabel } from "@/lib/utils";
 
 interface SpeechRecognitionLike {
@@ -261,7 +262,9 @@ export function WorkSafeWorkspace() {
   };
 
   return (
-    <Tabs value={tab} onValueChange={setTab}>
+    <div className="space-y-6">
+      <SubEngineSummaryBanner track="worksafe" />
+      <Tabs value={tab} onValueChange={setTab}>
       <TabsList>
         {hasPermission("observations:write") && (
           <TabsTrigger value="readiness">10s Worker Readiness</TabsTrigger>
@@ -631,5 +634,6 @@ export function WorkSafeWorkspace() {
         </TabsContent>
       )}
     </Tabs>
+    </div>
   );
 }

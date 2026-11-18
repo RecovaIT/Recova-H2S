@@ -19,8 +19,9 @@ from app.integrations.fhir import build_patient_fhir_bundle, validate_fhir_bundl
 from app.integrations.malaffi import push_fhir_bundle
 from app.models.care import CareFacility, ClinicalReview, InsurancePlan, Notification, Referral
 from app.models.clinical import Consent, Observation, Patient, ScreeningRecord, TrackEnrollment
-from app.models.engine import EmergencyEvent, PipelineRun, ScoringResult
+from app.models.engine import AgentStepResult, EmergencyEvent, PipelineRun, ScoringResult
 from app.models.enums import ConsentScope, ConsentStatus, EmergencyStatus, ReferralStatus, SlaStatus
+from app.models.identity import Membership, Organization
 from app.models.ops import BenchmarkRun, IntegrationConfig
 from app.schemas.workflow import (
     BenchmarkRunCreate,
@@ -326,4 +327,119 @@ def organization_overview(ctx: AuthContext = Depends(requires(P.ORG_READ))):
         "total_pipeline_runs": int(total_runs),
         "track_risk_distribution": track_distribution,
         "referral_funnel": referral_funnel,
+    }
+
+
+@reports_router.get("/platform-overview")
+def platform_overview(ctx: AuthContext = Depends(requires(P.ORG_READ))):
+    """Overall Recova Engine Command summary across customer centers, 4 sub-engines, and 6 agents."""
+    if not ctx.user.is_platform_admin:
+        raise Forbidden("Platform overview requires platform administrator context.")
+
+    orgs = ctx.db.scalars(select(Organization).where(Organization.is_active.is_(True)).order_by(Organization.name)).all()
+    patient_counts = dict(
+        ctx.db.execute(
+            select(Patient.organization_id, func.count(Patient.id))
+            .where(Patient.is_active.is_(True), Patient.is_synthetic.is_(False))
+            .group_by(Patient.organization_id)
+        ).all()
+    )
+    user_counts = dict(
+        ctx.db.execute(
+            select(Membership.organization_id, func.count(Membership.id))
+            .where(Membership.is_active.is_(True))
+            .group_by(Membership.organization_id)
+        ).all()
+    )
+    run_counts = dict(
+        ctx.db.execute(
+            select(PipelineRun.organization_id, func.count(PipelineRun.id))
+            .where(PipelineRun.benchmark_run_id.is_(None))
+            .group_by(PipelineRun.organization_id)
+        ).all()
+    )
+    emergency_counts = dict(
+        ctx.db.execute(
+            select(EmergencyEvent.organization_id, func.count(EmergencyEvent.id))
+            .where(EmergencyEvent.status == EmergencyStatus.OPEN.value)
+            .group_by(EmergencyEvent.organization_id)
+        ).all()
+    )
+    tier_rows = ctx.db.execute(
+        select(TrackEnrollment.organization_id, TrackEnrollment.track, TrackEnrollment.latest_risk_tier, func.count(TrackEnrollment.id))
+        .where(TrackEnrollment.status == "active")
+        .group_by(TrackEnrollment.organization_id, TrackEnrollment.track, TrackEnrollment.latest_risk_tier)
+    ).all()
+
+    org_track_risks: dict[tuple[uuid.UUID, str], dict[str, int]] = {}
+    for oid, trk, tier, cnt in tier_rows:
+        bucket = org_track_risks.setdefault((oid, trk), {})
+        bucket[tier or "UNSCORED"] = int(cnt)
+
+    sub_engines: dict[str, dict] = {}
+    for trk in ("core", "loop", "neuro", "worksafe"):
+        centers = []
+        risk_totals: dict[str, int] = {}
+        total_patients = 0
+        total_users = 0
+        total_runs = 0
+        total_emergencies = 0
+        for org in orgs:
+            primary = org.primary_programme or (org.enabled_tracks[0] if org.enabled_tracks else None)
+            if primary != trk and trk not in (org.enabled_tracks or []):
+                continue
+            p_cnt = int(patient_counts.get(org.id, 0))
+            u_cnt = int(user_counts.get(org.id, 0))
+            r_cnt = int(run_counts.get(org.id, 0))
+            e_cnt = int(emergency_counts.get(org.id, 0))
+            r_dist = org_track_risks.get((org.id, trk), {})
+            for k, v in r_dist.items():
+                risk_totals[k] = risk_totals.get(k, 0) + v
+            total_patients += p_cnt
+            total_users += u_cnt
+            total_runs += r_cnt
+            total_emergencies += e_cnt
+            centers.append(
+                {
+                    "id": str(org.id),
+                    "name": org.name,
+                    "slug": org.slug,
+                    "org_type": org.org_type,
+                    "emirate": org.emirate,
+                    "primary_programme": primary,
+                    "active_patients": p_cnt,
+                    "staff_members": u_cnt,
+                    "total_runs": r_cnt,
+                    "open_emergencies": e_cnt,
+                    "risk_distribution": r_dist,
+                }
+            )
+        sub_engines[trk] = {
+            "track": trk,
+            "total_centers": len(centers),
+            "total_patients": total_patients,
+            "total_staff": total_users,
+            "total_runs": total_runs,
+            "open_emergencies": total_emergencies,
+            "risk_distribution": risk_totals,
+            "centers": centers,
+        }
+
+    step_rows = ctx.db.execute(
+        select(AgentStepResult.agent_key, AgentStepResult.status, func.count(AgentStepResult.id))
+        .group_by(AgentStepResult.agent_key, AgentStepResult.status)
+    ).all()
+    agent_telemetry: dict[str, dict[str, int]] = {}
+    for akey, st, cnt in step_rows:
+        bucket = agent_telemetry.setdefault(akey, {})
+        bucket[st] = int(cnt)
+
+    return {
+        "total_centers": len(orgs),
+        "total_active_patients": sum(int(v) for v in patient_counts.values()),
+        "total_staff_members": sum(int(v) for v in user_counts.values()),
+        "total_pipeline_runs": sum(int(v) for v in run_counts.values()),
+        "open_emergencies": sum(int(v) for v in emergency_counts.values()),
+        "sub_engines": sub_engines,
+        "agent_telemetry": agent_telemetry,
     }

@@ -27,6 +27,7 @@ import { AgentExecutionGraph } from "@/components/AgentExecutionGraph";
 import { DecideAiReviewWorkspace } from "@/components/DecideAiReviewWorkspace";
 import { LongitudinalTrendChart } from "@/components/LongitudinalTrendChart";
 import { RiskBadge } from "@/components/RiskBadge";
+import { SubEngineSummaryBanner } from "@/components/SubEngineSummaryBanner";
 
 interface KeyPadSpec {
   id: number;
@@ -302,6 +303,7 @@ export function NeuroActivityGame() {
 
   return (
     <div className="space-y-6">
+      <SubEngineSummaryBanner track="neuro" />
       <Alert variant="warning" title="Non-Diagnostic Early Brain Health & Cognitive Wellness Screening">
         Recova Neuro monitors within-person longitudinal cognitive reaction-time &amp; accuracy shifts adjusted for education, language match, hearing/vision, and session practice effects. It is not a standalone diagnostic tool for dementia.
       </Alert>

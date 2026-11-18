@@ -86,13 +86,20 @@ describe("LoginPage & Tenant Onboarding", () => {
     await user.selectOptions(screen.getByLabelText(/organisation type/i), "clinic");
     await user.type(screen.getByLabelText(/full name/i), "Dr. Tariq Saeed");
     await user.type(screen.getByLabelText(/admin email/i), "admin@dubai-care.ae");
-    await user.type(screen.getByLabelText(/password/i), "DubaiClinicPass123!");
+    await user.type(screen.getByLabelText(/^password/i), "DubaiClinicPass123!");
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /recova loop/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
     await user.click(screen.getByRole("button", { name: /create organisation & sign in/i }));
 
     await waitFor(() => {
       expect(authService.registerOrganization).toHaveBeenCalledWith(
         expect.objectContaining({
           organization_name: "Dubai Care Clinic",
+          primary_programme: "loop",
+          enabled_tracks: ["loop"],
           organization_slug: "dubai-care-clinic",
           org_type: "clinic",
           admin_email: "admin@dubai-care.ae",
@@ -100,7 +107,7 @@ describe("LoginPage & Tenant Onboarding", () => {
       );
       expect(replaceMock).toHaveBeenCalledWith("/dashboard");
     });
-  });
+  }, 15000);
 
   it("remounts AuthGuard children when active organisation switches", async () => {
     const user = userEvent.setup({ delay: null });
