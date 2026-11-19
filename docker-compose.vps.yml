@@ -1,0 +1,131 @@
+name: recova-h2s
+
+x-h2s-common-env: &h2s-common-env
+  ENVIRONMENT: ${ENVIRONMENT:-production}
+  APP_NAME: ${APP_NAME:-Recova Anticipatory Health Platform}
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-recova_h2s}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.vps}@postgres:5432/${POSTGRES_DB:-recova_h2s}
+  SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env.vps}
+  FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?Set FIELD_ENCRYPTION_KEY in .env.vps}
+  COOKIE_SECURE: ${COOKIE_SECURE:-true}
+  COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+  SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-480}
+  SESSION_IDLE_TIMEOUT_MINUTES: ${SESSION_IDLE_TIMEOUT_MINUTES:-60}
+  CORS_ORIGINS: ${CORS_ORIGINS:-["https://h2s.recovahq.com"]}
+  FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-https://h2s.recovahq.com}
+  LLM_PROVIDER: ${LLM_PROVIDER:-none}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_MODEL: ${LLM_MODEL:-}
+  LLM_BASE_URL: ${LLM_BASE_URL:-}
+  LLM_AZURE_DEPLOYMENT: ${LLM_AZURE_DEPLOYMENT:-}
+  LLM_AZURE_API_VERSION: ${LLM_AZURE_API_VERSION:-2024-06-01}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_FROM: ${SMTP_FROM:-}
+  SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+  TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+  TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+  TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+  TWILIO_WHATSAPP_FROM: ${TWILIO_WHATSAPP_FROM:-}
+  MALAFFI_BASE_URL: ${MALAFFI_BASE_URL:-}
+  MALAFFI_CLIENT_ID: ${MALAFFI_CLIENT_ID:-}
+  MALAFFI_CLIENT_SECRET: ${MALAFFI_CLIENT_SECRET:-}
+  MALAFFI_TOKEN_URL: ${MALAFFI_TOKEN_URL:-}
+  SAHATNA_BASE_URL: ${SAHATNA_BASE_URL:-}
+  SAHATNA_API_KEY: ${SAHATNA_API_KEY:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: recova-h2s-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-recova_h2s}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.vps}
+      POSTGRES_DB: ${POSTGRES_DB:-recova_h2s}
+    # Deliberately NOT published to the host so it never conflicts with
+    # existing VPS databases on port 5432.
+    volumes:
+      - recova_h2s_pgdata:/var/lib/postgresql/data
+    networks:
+      - recova_h2s_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-recova_h2s} -d ${POSTGRES_DB:-recova_h2s}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: recova-h2s-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *h2s-common-env
+      RUN_EMBEDDED_WORKER: "false"
+    ports:
+      - "127.0.0.1:${H2S_BACKEND_PORT:-8810}:8000"
+    networks:
+      - recova_h2s_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: recova-h2s-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    command: ["python", "-m", "app.cli", "worker", "--concurrency", "2"]
+    environment:
+      <<: *h2s-common-env
+    networks:
+      - recova_h2s_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        BACKEND_INTERNAL_URL: http://backend:8000
+    container_name: recova-h2s-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+      NEXT_PUBLIC_API_BASE_URL: /api/v1
+    ports:
+      - "127.0.0.1:${H2S_FRONTEND_PORT:-3810}:3000"
+    networks:
+      - recova_h2s_net
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+networks:
+  recova_h2s_net:
+    name: recova_h2s_net
+    driver: bridge
+
+volumes:
+  recova_h2s_pgdata:
+    name: recova_h2s_pgdata
