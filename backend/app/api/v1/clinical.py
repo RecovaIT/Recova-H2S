@@ -138,6 +138,17 @@ def create_portal_invitation(
     )
     ctx.db.add(inv)
     ctx.db.flush()
+    from app.services.messaging import queue_email, public_link
+    from app.core.config import get_settings
+    from app.models.messaging import EmailDelivery
+    # A replacement invitation invalidates queued copies of the previous link.
+    for old in ctx.db.scalars(select(EmailDelivery).where(EmailDelivery.organization_id == ctx.org_id, EmailDelivery.category == 'portal_invitation', EmailDelivery.idempotency_key.in_([f'portal-invite:{i.id}' for i in prior]))):
+        if old.status != 'sent':
+            old.status = 'cancelled'
+    invitation_url = public_link('/accept-invitation', token=raw_token)
+    delivery = queue_email(ctx.db,to=email_val,subject='Your Recova patient portal invitation',
+        body=f'Your facility, {ctx.organization.name}, has invited you to your patient portal.\nOpen your private setup link:\n{invitation_url}\nIt expires in 72 hours. Existing users sign in with their current password.',
+        category='portal_invitation',organization_id=ctx.org_id,key=f'portal-invite:{inv.id}',expires_at=expires_at)
     ctx.audit("patient.portal_invitation.issue", "portal_invitation", inv.id, patient_id=detail.id, details={"patient_id": str(detail.id)})
     ctx.db.commit()
     primary_prog = ctx.organization.primary_programme if ctx.organization else None
@@ -150,7 +161,10 @@ def create_portal_invitation(
         "recipient_email": inv.recipient_email,
         "purpose": inv.purpose,
         "expires_at": inv.expires_at,
-        "invitation_token": raw_token,
+        "invitation_token": raw_token if get_settings().environment != 'production' else None,
+        "delivery_status": delivery.status,
+        "delivery_id": str(delivery.id),
+        "invitation_url": invitation_url if get_settings().environment != 'production' else None,
     }
 
 

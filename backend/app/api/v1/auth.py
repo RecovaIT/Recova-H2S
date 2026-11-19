@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Body, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
 
 from app.api.deps import AuthContext, client_ip, get_auth_context
 from app.core.config import get_settings
@@ -167,7 +168,7 @@ def accept_portal_invitation(
         raise ValidationFailed("Invitation token is required.")
 
     now = utcnow()
-    inv = ctx.db.scalar(select(PortalInvitation).where(PortalInvitation.token_hash == hash_token(raw_token)))
+    inv = ctx.db.scalar(select(PortalInvitation).where(PortalInvitation.token_hash == hash_token(raw_token)).with_for_update())
     if inv is None or inv.revoked_at is not None or inv.purpose != "portal_link":
         raise NotFound("Invalid or revoked portal invitation.")
     if inv.expires_at < now:
@@ -176,11 +177,17 @@ def accept_portal_invitation(
         raise Forbidden("This invitation is bound to a different recipient email.")
 
     patient = ctx.db.get(Patient, inv.patient_id)
-    if patient is None or patient.organization_id != inv.organization_id:
+    from app.models.identity import Organization
+    invited_org=ctx.db.get(Organization,inv.organization_id)
+    if patient is None or not patient.is_active or patient.organization_id != inv.organization_id or invited_org is None or not invited_org.is_active:
         raise NotFound("Linked participant record not found.")
 
     if inv.accepted_at is not None:
         if inv.accepted_by_user_id == ctx.user.id or patient.portal_user_id == ctx.user.id:
+            member=ctx.db.scalar(select(Membership).where(Membership.user_id==ctx.user.id,Membership.organization_id==inv.organization_id,Membership.is_active.is_(True)))
+            if not member:raise Forbidden('Facility access is disabled. Contact your facility.')
+            ctx.session.active_organization_id=inv.organization_id
+            ctx.db.commit()
             return Message(message="Portal invitation accepted and participant record linked.")
         raise Conflict("This portal invitation has already been used.")
 
@@ -235,10 +242,10 @@ def accept_portal_invitation(
             )
         )
     elif not existing_mem.is_active:
-        existing_mem.is_active = True
+        raise Forbidden('Facility access is disabled. Ask the facility to restore access before accepting.')
 
-    if ctx.session.active_organization_id is None:
-        ctx.session.active_organization_id = inv.organization_id
+    ctx.user.email_verified_at=now
+    ctx.session.active_organization_id = inv.organization_id
 
     ctx.audit(
         "patient.portal_invitation.accept",

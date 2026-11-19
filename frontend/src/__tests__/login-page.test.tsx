@@ -47,6 +47,12 @@ describe("LoginPage & Tenant Onboarding", () => {
     });
   });
 
+  it("opens the privacy-protected WorkSafe workspace for supervisors",async()=>{
+    vi.mocked(authService.me).mockResolvedValue({user:{id:"sup",email:"sup@example.com",full_name:"Supervisor",is_active:true,is_platform_admin:false,preferred_language:"en",created_at:"2026-11-19"},active_organization:{id:"yard",name:"Yard",slug:"yard",org_type:"employer",enabled_tracks:["worksafe"],is_active:true,settings:{},created_at:"2026-11-19"},role:"supervisor",permissions:["org:read","workforce:read_aggregate"],tracks:["worksafe"],memberships:[]});
+    render(<AuthProvider><LoginPage/></AuthProvider>);
+    await waitFor(()=>expect(replaceMock).toHaveBeenCalledWith("/worksafe"));
+  });
+
   it("submits OrganizationOnboardingCard in register mode and redirects to /dashboard", async () => {
     const user = userEvent.setup({ delay: null });
     vi.mocked(authService.registerOrganization).mockResolvedValue({
@@ -91,7 +97,10 @@ describe("LoginPage & Tenant Onboarding", () => {
     await user.click(screen.getByRole("button", { name: /recova loop/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
+    expect(screen.getByRole("checkbox", { name: /I confirm the shared/i })).not.toBeChecked();
+    await user.click(screen.getByRole("checkbox", { name: /I confirm the shared/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
+    expect(authService.registerOrganization).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: /create organisation & sign in/i }));
 
     await waitFor(() => {

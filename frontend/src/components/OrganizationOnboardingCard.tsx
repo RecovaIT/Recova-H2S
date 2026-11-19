@@ -110,9 +110,10 @@ export function OrganizationOnboardingCard({ mode }: { mode: "bootstrap" | "regi
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [setupSecret,setSetupSecret] = useState("");
 
   const [serviceContact, setServiceContact] = useState("");
-  const [participationAccepted, setParticipationAccepted] = useState(true);
+  const [participationAccepted, setParticipationAccepted] = useState(false);
   const [externalSynthesisOptIn, setExternalSynthesisOptIn] = useState(false);
   const idempotencyKeyRef = useRef<string | null>(null);
 
@@ -181,6 +182,7 @@ export function OrganizationOnboardingCard({ mode }: { mode: "bootstrap" | "regi
     }
 
     const payload: BootstrapPayload = {
+      ...(isBootstrap ? {bootstrap_setup_token:setupSecret} : {}),
       organization_name: orgName.trim(),
       organization_slug: cleanSlug,
       org_type: orgType,
@@ -269,6 +271,7 @@ export function OrganizationOnboardingCard({ mode }: { mode: "bootstrap" | "regi
         </CardHeader>
 
         <CardContent className="pt-5">
+          {isBootstrap && <div className="mb-5 space-y-2"><Label htmlFor="operator-setup-secret">Production operator setup secret</Label><Input id="operator-setup-secret" type="password" autoComplete="off" value={setupSecret} onChange={e=>setSetupSecret(e.target.value)}/><p className="text-xs text-slate-600">Enter the private setup secret supplied by the deployment owner. It is required for production initialization.</p></div>}
           {error && (
             <Alert variant="danger" className="mb-4">
               {error}
@@ -532,11 +535,11 @@ export function OrganizationOnboardingCard({ mode }: { mode: "bootstrap" | "regi
               </div>
 
               {step < 5 ? (
-                <Button type="button" onClick={goNext} className="bg-[#003e5e] text-[#aeff9a] hover:bg-[#002e46]">
+                <Button key="continue" type="button" onClick={goNext} className="bg-[#003e5e] text-[#aeff9a] hover:bg-[#002e46]">
                   Continue <ArrowRight className="h-4 w-4" />
                 </Button>
               ) : (
-                <Button type="submit" disabled={submitting} className="bg-[#003e5e] text-[#aeff9a] hover:bg-[#002e46]">
+                <Button key="create" type="submit" disabled={submitting} className="bg-[#003e5e] text-[#aeff9a] hover:bg-[#002e46]">
                   <ShieldCheck className="h-4 w-4" />
                   {submitting
                     ? "Creating organisation..."

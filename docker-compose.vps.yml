@@ -5,6 +5,7 @@ x-h2s-common-env: &h2s-common-env
   APP_NAME: ${APP_NAME:-Recova Anticipatory Health Platform}
   DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-recova_h2s}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.vps}@postgres:5432/${POSTGRES_DB:-recova_h2s}
   SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env.vps}
+  BOOTSTRAP_SETUP_TOKEN: ${BOOTSTRAP_SETUP_TOKEN:-}
   FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?Set FIELD_ENCRYPTION_KEY in .env.vps}
   COOKIE_SECURE: ${COOKIE_SECURE:-true}
   COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}

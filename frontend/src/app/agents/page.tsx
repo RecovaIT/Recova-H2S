@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AlertOctagon, Radio, RefreshCw } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useRealtimeEvents } from "@/hooks/useRealtimeEvents";
@@ -24,24 +24,36 @@ export default function AgentsMonitoringPage() {
   const [selectedRun, setSelectedRun] = useState<PipelineRunDetail | null>(null);
   const [emergencies, setEmergencies] = useState<EmergencyEvent[]>([]);
   const [busy, setBusy] = useState(false);
+  const selectedId = useRef<string | null>(null);
+  const refreshing = useRef(false);
+  useEffect(()=>{selectedId.current=selectedRun?.id||null},[selectedRun?.id]);
 
   const loadData = useCallback(async () => {
+    if(refreshing.current)return;
+    refreshing.current=true;
+    try {
     const [runsPage, emList] = await Promise.all([
       engineService.listRuns({ page: 1, page_size: 25 }),
       engineService.listEmergencies(),
     ]);
     setRuns(runsPage.items);
     setEmergencies(emList);
-    if (runsPage.items.length > 0 && !selectedRun) {
-      setSelectedRun(await engineService.getRun(runsPage.items[0].id));
+    const target=selectedId.current || runsPage.items[0]?.id;
+    if (target) {
+      selectedId.current=target;
+      const detail=await engineService.getRun(target);
+      if(selectedId.current===target)setSelectedRun(detail);
     }
-  }, [selectedRun]);
+    } catch(e){pushToast("Could not refresh pipeline state", "error",e instanceof Error?e.message:undefined)}
+    finally{refreshing.current=false}
+  }, [pushToast]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       void loadData();
     }, 0);
-    return () => clearTimeout(timer);
+    const fallback=setInterval(()=>void loadData(),15000);
+    return () => {clearTimeout(timer);clearInterval(fallback)};
   }, [loadData]);
 
   const { connected, events } = useRealtimeEvents(true, () => {

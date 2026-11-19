@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 
 from app.api.deps import AuthContext, requires
 from app.core.permissions import P
@@ -45,7 +46,9 @@ def list_reviews(
 
 
 @reviews_router.post("", response_model=ClinicalReviewOut, status_code=201)
-def create_review(req: ClinicalReviewCreate, ctx: AuthContext = Depends(requires(P.REVIEWS_SIGN))):
+def create_review(
+    req: ClinicalReviewCreate, ctx: AuthContext = Depends(requires(P.REVIEWS_SIGN))
+):
     return care_svc.create_clinical_review(ctx, req)
 
 
@@ -58,11 +61,20 @@ def list_referrals(
     sla_status: str | None = Query(None),
     ctx: AuthContext = Depends(requires(P.REFERRALS_READ)),
 ):
-    return care_svc.list_referrals(ctx, params, track=track, status=status, patient_id=patient_id, sla_status=sla_status)
+    return care_svc.list_referrals(
+        ctx,
+        params,
+        track=track,
+        status=status,
+        patient_id=patient_id,
+        sla_status=sla_status,
+    )
 
 
 @referrals_router.post("", response_model=ReferralOut, status_code=201)
-def create_referral(req: ReferralCreate, ctx: AuthContext = Depends(requires(P.REFERRALS_WRITE))):
+def create_referral(
+    req: ReferralCreate, ctx: AuthContext = Depends(requires(P.REFERRALS_WRITE))
+):
     return care_svc.create_referral(ctx, req)
 
 
@@ -72,7 +84,9 @@ def run_sla_evaluation(ctx: AuthContext = Depends(requires(P.REFERRALS_WRITE))):
 
 
 @referrals_router.get("/{referral_id}", response_model=ReferralDetailOut)
-def get_referral(referral_id: uuid.UUID, ctx: AuthContext = Depends(requires(P.REFERRALS_READ))):
+def get_referral(
+    referral_id: uuid.UUID, ctx: AuthContext = Depends(requires(P.REFERRALS_READ))
+):
     r, ov = care_svc.get_referral(ctx, referral_id)
     out = ReferralDetailOut.model_validate(r)
     out.outcome_verification = OutcomeVerificationOut.model_validate(ov) if ov else None
@@ -80,28 +94,70 @@ def get_referral(referral_id: uuid.UUID, ctx: AuthContext = Depends(requires(P.R
 
 
 @referrals_router.post("/{referral_id}/notify")
-def notify_patient(referral_id: uuid.UUID, req: ReferralNotifyRequest, ctx: AuthContext = Depends(requires(P.REFERRALS_WRITE))):
+def notify_patient(
+    referral_id: uuid.UUID,
+    req: ReferralNotifyRequest,
+    ctx: AuthContext = Depends(requires(P.REFERRALS_WRITE)),
+):
     r, n = care_svc.notify_patient_for_referral(ctx, referral_id, req)
-    return {"referral": ReferralOut.model_validate(r), "notification": NotificationOut.model_validate(n)}
+    return {
+        "referral": ReferralOut.model_validate(r),
+        "notification": NotificationOut.model_validate(n),
+    }
 
 
 @referrals_router.post("/{referral_id}/book", response_model=ReferralOut)
-def book_referral(referral_id: uuid.UUID, req: ReferralBookRequest, ctx: AuthContext = Depends(requires(P.REFERRALS_WRITE))):
+def book_referral(
+    referral_id: uuid.UUID,
+    req: ReferralBookRequest,
+    ctx: AuthContext = Depends(requires(P.REFERRALS_WRITE)),
+):
     return care_svc.book_referral(ctx, referral_id, req)
 
 
-@referrals_router.post("/{referral_id}/complete-consultation", response_model=ReferralOut)
-def complete_consultation(referral_id: uuid.UUID, req: ReferralCompleteRequest, ctx: AuthContext = Depends(requires(P.REFERRALS_WRITE))):
+@referrals_router.post(
+    "/{referral_id}/complete-consultation", response_model=ReferralOut
+)
+def complete_consultation(
+    referral_id: uuid.UUID,
+    req: ReferralCompleteRequest,
+    ctx: AuthContext = Depends(requires(P.REFERRALS_WRITE)),
+):
     return care_svc.complete_referral_consultation(ctx, referral_id, req)
 
 
 @referrals_router.post("/{referral_id}/missed", response_model=ReferralOut)
-def mark_missed(referral_id: uuid.UUID, notes: str | None = Query(None), ctx: AuthContext = Depends(requires(P.REFERRALS_WRITE))):
+def mark_missed(
+    referral_id: uuid.UUID,
+    notes: str | None = Query(None),
+    ctx: AuthContext = Depends(requires(P.REFERRALS_WRITE)),
+):
     return care_svc.mark_referral_missed(ctx, referral_id, notes=notes)
 
 
-@outcomes_router.post("/referral/{referral_id}/verify", response_model=OutcomeVerificationOut, status_code=201)
-def verify_outcome(referral_id: uuid.UUID, req: OutcomeVerificationCreate, ctx: AuthContext = Depends(requires(P.OUTCOMES_VERIFY))):
+class CancelRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+@referrals_router.post("/{referral_id}/cancel", response_model=ReferralOut)
+def cancel_referral(
+    referral_id: uuid.UUID,
+    req: CancelRequest,
+    ctx: AuthContext = Depends(requires(P.REFERRALS_WRITE)),
+):
+    return care_svc.cancel_referral(ctx, referral_id, req.reason)
+
+
+@outcomes_router.post(
+    "/referral/{referral_id}/verify",
+    response_model=OutcomeVerificationOut,
+    status_code=201,
+)
+def verify_outcome(
+    referral_id: uuid.UUID,
+    req: OutcomeVerificationCreate,
+    ctx: AuthContext = Depends(requires(P.OUTCOMES_VERIFY)),
+):
     return care_svc.verify_referral_outcome(ctx, referral_id, req)
 
 
@@ -115,20 +171,32 @@ def list_interventions(
 
 
 @interventions_router.post("", response_model=InterventionOut, status_code=201)
-def create_intervention(req: InterventionCreate, ctx: AuthContext = Depends(requires(P.INTERVENTIONS_WRITE))):
+def create_intervention(
+    req: InterventionCreate, ctx: AuthContext = Depends(requires(P.INTERVENTIONS_WRITE))
+):
     return care_svc.create_intervention(ctx, req)
 
 
 @interventions_router.patch("/{intervention_id}", response_model=InterventionOut)
-def update_intervention(intervention_id: uuid.UUID, req: InterventionUpdateRequest, ctx: AuthContext = Depends(requires(P.INTERVENTIONS_WRITE))):
+def update_intervention(
+    intervention_id: uuid.UUID,
+    req: InterventionUpdateRequest,
+    ctx: AuthContext = Depends(requires(P.INTERVENTIONS_WRITE)),
+):
     return care_svc.update_intervention(ctx, intervention_id, req)
 
 
 @notifications_router.get("", response_model=Page[NotificationOut])
-def list_notifications(params: PageParams = Depends(), ctx: AuthContext = Depends(requires(P.NOTIFICATIONS_READ))):
+def list_notifications(
+    params: PageParams = Depends(),
+    ctx: AuthContext = Depends(requires(P.NOTIFICATIONS_READ)),
+):
     return care_svc.list_notifications(ctx, params)
 
 
 @notifications_router.post("/{notification_id}/read", response_model=NotificationOut)
-def read_notification(notification_id: uuid.UUID, ctx: AuthContext = Depends(requires(P.NOTIFICATIONS_READ))):
+def read_notification(
+    notification_id: uuid.UUID,
+    ctx: AuthContext = Depends(requires(P.NOTIFICATIONS_READ)),
+):
     return care_svc.mark_notification_read(ctx, notification_id)

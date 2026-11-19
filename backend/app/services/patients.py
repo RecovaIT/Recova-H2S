@@ -16,15 +16,73 @@ from app.core.security import decrypt_str, encrypt_str, mask
 from app.models.base import utcnow
 from app.models.clinical import Consent, Department, Patient, TrackEnrollment
 from app.models.enums import ConsentStatus
-from app.schemas.clinical import ConsentCreate, EnrollmentCreate, PatientCreate, PatientDetailOut, PatientUpdate
+from app.models.identity import Membership, User
+from app.models.care import InsurancePlan
+from app.schemas.clinical import (
+    ConsentCreate,
+    EnrollmentCreate,
+    PatientCreate,
+    PatientDetailOut,
+    PatientUpdate,
+)
 from app.schemas.common import PageParams, paginate
+
+
+def _validate_patient_links(ctx, req):
+    for field, model in [
+        ("department_id", Department),
+        ("insurance_plan_id", InsurancePlan),
+    ]:
+        value = getattr(req, field, None)
+        if (
+            value
+            and ctx.db.scalar(
+                select(model.id).where(
+                    model.id == value, model.organization_id == ctx.org_id
+                )
+            )
+            is None
+        ):
+            raise ValidationFailed(
+                f'{field.replace("_", " ")} must belong to the active facility'
+            )
+    if req.primary_clinician_id:
+        clinician = ctx.db.scalar(
+            select(User)
+            .join(Membership, Membership.user_id == User.id)
+            .where(
+                User.id == req.primary_clinician_id,
+                User.is_active.is_(True),
+                User.license_number.is_not(None),
+                User.license_number != "",
+                Membership.organization_id == ctx.org_id,
+                Membership.is_active.is_(True),
+                Membership.role.in_(
+                    [
+                        "clinician",
+                        "psychiatrist",
+                        "occ_health_director",
+                        "org_admin",
+                        "platform_admin",
+                    ]
+                ),
+            )
+        )
+        if not clinician:
+            raise ValidationFailed(
+                "Assign an active practitioner with a recorded licence in this facility"
+            )
 
 
 def _patient_detail(p: Patient) -> PatientDetailOut:
     nat = decrypt_str(p.national_id_encrypted) if p.national_id_encrypted else None
     phone = decrypt_str(p.phone_encrypted) if p.phone_encrypted else None
     email = decrypt_str(p.email_encrypted) if p.email_encrypted else None
-    ins_id = decrypt_str(p.insurance_member_id_encrypted) if p.insurance_member_id_encrypted else None
+    ins_id = (
+        decrypt_str(p.insurance_member_id_encrypted)
+        if p.insurance_member_id_encrypted
+        else None
+    )
     out = PatientDetailOut.model_validate(p)
     out.national_id_masked = mask(nat, 4) if nat else None
     out.phone_masked = mask(phone, 4) if phone else None
@@ -43,6 +101,7 @@ def list_patients(
     active_only: bool = True,
 ) -> dict:
     ctx.require(P.PATIENTS_READ)
+    ctx.require(P.PATIENTS_PHI)
     if track:
         ctx.require_track(track)
     stmt = (
@@ -64,7 +123,9 @@ def list_patients(
             )
         )
     if track or risk_tier:
-        sub = select(TrackEnrollment.patient_id).where(TrackEnrollment.organization_id == ctx.org_id)
+        sub = select(TrackEnrollment.patient_id).where(
+            TrackEnrollment.organization_id == ctx.org_id
+        )
         if track:
             sub = sub.where(TrackEnrollment.track == track)
         if risk_tier:
@@ -75,17 +136,26 @@ def list_patients(
         ctx.db,
         stmt,
         params,
-        sortable={"mrn": Patient.mrn, "family_name": Patient.family_name, "created_at": Patient.created_at},
+        sortable={
+            "mrn": Patient.mrn,
+            "family_name": Patient.family_name,
+            "created_at": Patient.created_at,
+        },
         default_sort=Patient.created_at.desc(),
     )
 
 
 def get_patient(ctx: AuthContext, patient_id: uuid.UUID) -> PatientDetailOut:
     ctx.require(P.PATIENTS_READ)
+    ctx.require(P.PATIENTS_PHI)
     p = ctx.db.scalar(
         select(Patient)
         .options(selectinload(Patient.enrollments))
-        .where(Patient.id == patient_id, Patient.organization_id == ctx.org_id, Patient.is_synthetic.is_(False))
+        .where(
+            Patient.id == patient_id,
+            Patient.organization_id == ctx.org_id,
+            Patient.is_synthetic.is_(False),
+        )
     )
     if p is None:
         raise NotFound("Patient not found")
@@ -96,27 +166,40 @@ def get_patient(ctx: AuthContext, patient_id: uuid.UUID) -> PatientDetailOut:
 
 def create_patient(ctx: AuthContext, req: PatientCreate) -> PatientDetailOut:
     ctx.require(P.PATIENTS_WRITE)
+    ctx.require(P.PATIENTS_PHI)
+    _validate_patient_links(ctx, req)
     if req.tracks:
         selected_tracks = list(dict.fromkeys(req.tracks))
     else:
         default_prog = (
             ctx.organization.primary_programme
             if ctx.organization and ctx.organization.primary_programme
-            else (ctx.organization.enabled_tracks[0] if ctx.organization and ctx.organization.enabled_tracks else "core")
+            else (
+                ctx.organization.enabled_tracks[0]
+                if ctx.organization and ctx.organization.enabled_tracks
+                else "core"
+            )
         )
         selected_tracks = [Track(default_prog)]
     for t in selected_tracks:
         ctx.require_track(t.value)
 
     existing = ctx.db.scalar(
-        select(Patient.id).where(Patient.organization_id == ctx.org_id, Patient.mrn == req.mrn.strip())
+        select(Patient.id).where(
+            Patient.organization_id == ctx.org_id, Patient.mrn == req.mrn.strip()
+        )
     )
     if existing:
-        raise Conflict(f"MRN / Participant ID '{req.mrn}' already exists in this organisation")
+        raise Conflict(
+            f"MRN / Participant ID '{req.mrn}' already exists in this organisation"
+        )
 
     if req.department_id:
         dept = ctx.db.scalar(
-            select(Department).where(Department.id == req.department_id, Department.organization_id == ctx.org_id)
+            select(Department).where(
+                Department.id == req.department_id,
+                Department.organization_id == ctx.org_id,
+            )
         )
         if dept is None:
             raise ValidationFailed("Department not found in active organisation")
@@ -133,7 +216,11 @@ def create_patient(ctx: AuthContext, req: PatientCreate) -> PatientDetailOut:
         national_id_encrypted=encrypt_str(req.national_id),
         phone_encrypted=encrypt_str(req.phone),
         email_encrypted=encrypt_str(str(req.email)) if req.email else None,
-        emergency_contact_encrypted=encrypt_str(json.dumps(req.emergency_contact)) if req.emergency_contact else None,
+        emergency_contact_encrypted=(
+            encrypt_str(json.dumps(req.emergency_contact))
+            if req.emergency_contact
+            else None
+        ),
         education_level=req.education_level,
         primary_language_matches_assessment=req.primary_language_matches_assessment,
         hearing_status=req.hearing_status,
@@ -143,7 +230,7 @@ def create_patient(ctx: AuthContext, req: PatientCreate) -> PatientDetailOut:
         insurance_member_id_encrypted=encrypt_str(req.insurance_member_id),
         department_id=req.department_id,
         job_role=req.job_role,
-        primary_clinician_id=req.primary_clinician_id or ctx.user.id,
+        primary_clinician_id=req.primary_clinician_id,
         created_by_id=ctx.user.id,
         is_synthetic=False,
     )
@@ -174,19 +261,37 @@ def create_patient(ctx: AuthContext, req: PatientCreate) -> PatientDetailOut:
                 ],
             )
         )
-    ctx.audit("patient.create", "patient", p.id, patient_id=p.id, details={"mrn": p.mrn, "tracks": [t.value for t in selected_tracks]})
+    ctx.audit(
+        "patient.create",
+        "patient",
+        p.id,
+        patient_id=p.id,
+        details={"mrn": p.mrn, "tracks": [t.value for t in selected_tracks]},
+    )
     ctx.db.commit()
-    p = ctx.db.scalar(select(Patient).options(selectinload(Patient.enrollments)).where(Patient.id == p.id))
+    p = ctx.db.scalar(
+        select(Patient)
+        .options(selectinload(Patient.enrollments))
+        .where(Patient.id == p.id)
+    )
     assert p is not None
     return _patient_detail(p)
 
 
-def update_patient(ctx: AuthContext, patient_id: uuid.UUID, req: PatientUpdate) -> PatientDetailOut:
+def update_patient(
+    ctx: AuthContext, patient_id: uuid.UUID, req: PatientUpdate
+) -> PatientDetailOut:
     ctx.require(P.PATIENTS_WRITE)
+    ctx.require(P.PATIENTS_PHI)
+    _validate_patient_links(ctx, req)
     p = ctx.db.scalar(
         select(Patient)
         .options(selectinload(Patient.enrollments))
-        .where(Patient.id == patient_id, Patient.organization_id == ctx.org_id, Patient.is_synthetic.is_(False))
+        .where(
+            Patient.id == patient_id,
+            Patient.organization_id == ctx.org_id,
+            Patient.is_synthetic.is_(False),
+        )
     )
     if p is None:
         raise NotFound("Patient not found")
@@ -244,23 +349,38 @@ def update_patient(ctx: AuthContext, patient_id: uuid.UUID, req: PatientUpdate) 
         "is_active": p.is_active,
         "insurance_plan_id": str(p.insurance_plan_id) if p.insurance_plan_id else None,
     }
-    ctx.audit("patient.update", "patient", p.id, patient_id=p.id, changes=audit.diff(before, after))
+    ctx.audit(
+        "patient.update",
+        "patient",
+        p.id,
+        patient_id=p.id,
+        changes=audit.diff(before, after),
+    )
     ctx.db.commit()
     return _patient_detail(p)
 
 
-def enroll_track(ctx: AuthContext, patient_id: uuid.UUID, req: EnrollmentCreate) -> TrackEnrollment:
+def enroll_track(
+    ctx: AuthContext, patient_id: uuid.UUID, req: EnrollmentCreate
+) -> TrackEnrollment:
     ctx.require(P.PATIENTS_WRITE)
+    ctx.require(P.PATIENTS_PHI)
     ctx.require_track(req.track.value)
     p = ctx.db.scalar(
-        select(Patient).where(Patient.id == patient_id, Patient.organization_id == ctx.org_id, Patient.is_synthetic.is_(False))
+        select(Patient).where(
+            Patient.id == patient_id,
+            Patient.organization_id == ctx.org_id,
+            Patient.is_synthetic.is_(False),
+        )
     )
     if p is None:
         raise NotFound("Patient not found")
     now = utcnow()
     reason = req.reason or "Authorised clinical enrolment update"
     existing = ctx.db.scalar(
-        select(TrackEnrollment).where(TrackEnrollment.patient_id == p.id, TrackEnrollment.track == req.track.value)
+        select(TrackEnrollment).where(
+            TrackEnrollment.patient_id == p.id, TrackEnrollment.track == req.track.value
+        )
     )
     if existing is not None:
         existing.status = "active"
@@ -309,26 +429,42 @@ def enroll_track(ctx: AuthContext, patient_id: uuid.UUID, req: EnrollmentCreate)
     )
     ctx.db.add(enr)
     ctx.db.flush()
-    ctx.audit("patient.enroll", "track_enrollment", enr.id, patient_id=p.id, details={"track": req.track.value, "reason": reason})
+    ctx.audit(
+        "patient.enroll",
+        "track_enrollment",
+        enr.id,
+        patient_id=p.id,
+        details={"track": req.track.value, "reason": reason},
+    )
     ctx.db.commit()
     return enr
 
 
 def list_consents(ctx: AuthContext, patient_id: uuid.UUID) -> list[Consent]:
     ctx.require(P.CONSENTS_READ)
-    p = ctx.db.scalar(select(Patient).where(Patient.id == patient_id, Patient.organization_id == ctx.org_id))
+    p = ctx.db.scalar(
+        select(Patient).where(
+            Patient.id == patient_id, Patient.organization_id == ctx.org_id
+        )
+    )
     if p is None:
         raise NotFound("Patient not found")
     return list(
         ctx.db.scalars(
-            select(Consent).where(Consent.organization_id == ctx.org_id, Consent.patient_id == p.id).order_by(Consent.effective_at.desc())
+            select(Consent)
+            .where(Consent.organization_id == ctx.org_id, Consent.patient_id == p.id)
+            .order_by(Consent.effective_at.desc())
         ).all()
     )
 
 
 def record_consent(ctx: AuthContext, req: ConsentCreate) -> Consent:
     ctx.require(P.CONSENTS_WRITE)
-    p = ctx.db.scalar(select(Patient).where(Patient.id == req.patient_id, Patient.organization_id == ctx.org_id))
+    p = ctx.db.scalar(
+        select(Patient).where(
+            Patient.id == req.patient_id, Patient.organization_id == ctx.org_id
+        )
+    )
     if p is None:
         raise NotFound("Patient not found")
     c = Consent(
@@ -354,21 +490,38 @@ def record_consent(ctx: AuthContext, req: ConsentCreate) -> Consent:
         "consent",
         c.id,
         patient_id=p.id,
-        details={"scope": c.scope, "method": c.method, "policy_version": c.policy_version, "authority_to_act": c.authority_to_act},
+        details={
+            "scope": c.scope,
+            "method": c.method,
+            "policy_version": c.policy_version,
+            "authority_to_act": c.authority_to_act,
+        },
     )
     ctx.db.commit()
     return c
 
 
-def revoke_consent(ctx: AuthContext, consent_id: uuid.UUID, reason: str | None = None) -> Consent:
+def revoke_consent(
+    ctx: AuthContext, consent_id: uuid.UUID, reason: str | None = None
+) -> Consent:
     ctx.require(P.CONSENTS_WRITE)
-    c = ctx.db.scalar(select(Consent).where(Consent.id == consent_id, Consent.organization_id == ctx.org_id))
+    c = ctx.db.scalar(
+        select(Consent).where(
+            Consent.id == consent_id, Consent.organization_id == ctx.org_id
+        )
+    )
     if c is None:
         raise NotFound("Consent record not found")
     c.status = ConsentStatus.REVOKED.value
     c.revoked_at = utcnow()
     if reason:
         c.notes = f"{c.notes or ''}\nRevoked: {reason}".strip()
-    ctx.audit("consent.revoke", "consent", c.id, patient_id=c.patient_id, details={"scope": c.scope, "reason": reason})
+    ctx.audit(
+        "consent.revoke",
+        "consent",
+        c.id,
+        patient_id=c.patient_id,
+        details={"scope": c.scope, "reason": reason},
+    )
     ctx.db.commit()
     return c

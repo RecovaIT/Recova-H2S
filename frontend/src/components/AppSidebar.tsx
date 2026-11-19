@@ -140,6 +140,7 @@ const NAVIGATION_GROUPS = [
         icon: Settings,
         permission: "settings:read",
       },
+      { href: "/account", label: "Account security", icon: Shield, permission: "org:read" },
       {
         href: "/admin",
         label: "Administration",

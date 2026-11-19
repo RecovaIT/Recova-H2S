@@ -101,7 +101,7 @@ DEFAULT_ROLE_PERMISSIONS: dict[Role, frozenset[str]] = {
     }),
     # Supervisors only ever see anonymised department aggregates by default.
     Role.SUPERVISOR: frozenset({
-        P.ORG_READ, P.WORKFORCE_AGGREGATE, P.INTERVENTIONS_READ, P.INTERVENTIONS_WRITE, P.REPORTS_READ,
+        P.ORG_READ, P.WORKFORCE_AGGREGATE,
     }),
     # Authority users coordinate scoped public-health notices & aggregate reporting only.
     Role.AUTHORITY_USER: frozenset({
@@ -130,4 +130,7 @@ def effective_permissions(role: Role, grants: set[str] | None = None, revokes: s
         perms |= {g for g in grants if g in ALL_PERMISSIONS and g != P.PLATFORM_ADMIN}
     if revokes:
         perms -= revokes
+    if role == Role.SUPERVISOR:
+        # Privacy ceiling applies to legacy grants too, across every API surface.
+        perms &= set(DEFAULT_ROLE_PERMISSIONS[Role.SUPERVISOR])
     return perms

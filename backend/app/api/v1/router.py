@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.auth import router as auth_router
+from app.api.v1.account_setup import router as account_setup_router
 from app.api.v1.authority import authority_router, notices_router
 from app.api.v1.care import (
     interventions_router,
@@ -31,6 +32,7 @@ from app.api.v1.portal import router as portal_router
 api_v1_router = APIRouter()
 for r in [
     auth_router,
+    account_setup_router,
     orgs_router,
     users_router,
     patients_router,

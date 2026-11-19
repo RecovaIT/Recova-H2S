@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import AuthContext
 from app.core import audit
-from app.core.errors import Conflict, NotFound, ValidationFailed
+from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailed
 from app.core.permissions import P
 from app.core.security import encrypt_str
 from app.integrations.notifications import dispatch_notification
@@ -28,7 +28,12 @@ from app.models.care import (
     ReferralEvent,
 )
 from app.models.clinical import Patient
-from app.models.engine import ClinicalSynthesis, EmergencyEvent, PipelineRun, ScoringResult
+from app.models.engine import (
+    ClinicalSynthesis,
+    EmergencyEvent,
+    PipelineRun,
+    ScoringResult,
+)
 from app.models.enums import (
     IntegrationStatus,
     InterventionStatus,
@@ -56,21 +61,72 @@ from app.schemas.workflow import (
 )
 
 
-def create_clinical_review(ctx: AuthContext, req: ClinicalReviewCreate) -> ClinicalReview:
+def _check_external_consent(db, patient, channel):
+    if getattr(channel, "value", channel) in ("email", "sms", "whatsapp", "sahatna"):
+        from app.agents.gate1_consent import evaluate_consents
+
+        scopes, _ = evaluate_consents(db, patient, utcnow())
+        if not {"data_processing", "optional_channels"}.issubset(scopes):
+            raise Forbidden(
+                "Patient has not enabled external care messages. Use the portal inbox instead."
+            )
+
+
+def create_clinical_review(
+    ctx: AuthContext, req: ClinicalReviewCreate
+) -> ClinicalReview:
     ctx.require(P.REVIEWS_SIGN)
+    if not (ctx.user.license_number or "").strip():
+        raise ValidationFailed(
+            "A practitioner licence must be recorded before clinical sign-off"
+        )
     run = ctx.db.scalar(
-        select(PipelineRun).where(PipelineRun.id == req.run_id, PipelineRun.organization_id == ctx.org_id)
+        select(PipelineRun).where(
+            PipelineRun.id == req.run_id, PipelineRun.organization_id == ctx.org_id
+        )
     )
     if run is None or run.patient_id is None:
         raise NotFound("Pipeline run not found")
     ctx.require_track(run.track)
 
+    if req.referral_id:
+        target = ctx.db.scalar(
+            select(Referral).where(
+                Referral.id == req.referral_id, Referral.organization_id == ctx.org_id
+            )
+        )
+        if target is None:
+            raise NotFound("Referral not found")
+        if (
+            target.patient_id != run.patient_id
+            or target.track != run.track
+            or (target.run_id and target.run_id != run.id)
+        ):
+            raise ValidationFailed(
+                "Referral, patient, programme and pipeline run must match"
+            )
+        if target.closed_at:
+            raise Conflict("A closed referral cannot be changed by a new review")
+
     patient = ctx.db.get(Patient, run.patient_id)
     assert patient is not None
+    if req.notify_patient_channel:
+        _check_external_consent(ctx.db, patient, req.notify_patient_channel)
 
-    syn = ctx.db.scalar(select(ClinicalSynthesis).where(ClinicalSynthesis.run_id == run.id))
+    syn = ctx.db.scalar(
+        select(ClinicalSynthesis).where(ClinicalSynthesis.run_id == run.id)
+    )
     now = utcnow()
-    sig_input = f"{run.id}:{ctx.user.id}:{req.decision.value}:{now.isoformat()}"
+    sig_input = json.dumps(
+        {
+            "run": str(run.id),
+            "reviewer": str(ctx.user.id),
+            "licence": ctx.user.license_number,
+            "signed_at": now.isoformat(),
+            "decision": req.model_dump(mode="json"),
+        },
+        sort_keys=True,
+    )
     sig_hash = hashlib.sha256(sig_input.encode()).hexdigest()
 
     review = ClinicalReview(
@@ -96,7 +152,9 @@ def create_clinical_review(ctx: AuthContext, req: ClinicalReviewCreate) -> Clini
     referral: Referral | None = None
     if req.referral_id:
         referral = ctx.db.scalar(
-            select(Referral).where(Referral.id == req.referral_id, Referral.organization_id == ctx.org_id)
+            select(Referral).where(
+                Referral.id == req.referral_id, Referral.organization_id == ctx.org_id
+            )
         )
     else:
         referral = ctx.db.scalar(
@@ -110,7 +168,10 @@ def create_clinical_review(ctx: AuthContext, req: ClinicalReviewCreate) -> Clini
     if referral is not None:
         old_status = referral.status
         referral.review_id = review.id
-        if req.decision in {ReviewDecision.APPROVE_REFERRAL, ReviewDecision.MODIFY_PLAN}:
+        if req.decision in {
+            ReviewDecision.APPROVE_REFERRAL,
+            ReviewDecision.MODIFY_PLAN,
+        }:
             if referral.status == ReferralStatus.PROPOSED.value:
                 referral.status = ReferralStatus.APPROVED.value
             referral.approved_by_id = ctx.user.id
@@ -123,7 +184,10 @@ def create_clinical_review(ctx: AuthContext, req: ClinicalReviewCreate) -> Clini
                     to_status=referral.status,
                     actor_user_id=ctx.user.id,
                     actor_label=ctx.user.email,
-                    details={"review_id": str(review.id), "decision": req.decision.value},
+                    details={
+                        "review_id": str(review.id),
+                        "decision": req.decision.value,
+                    },
                 )
             )
             if req.notify_patient_channel:
@@ -137,7 +201,10 @@ def create_clinical_review(ctx: AuthContext, req: ClinicalReviewCreate) -> Clini
                     recipient_patient=patient,
                     referral_id=referral.id,
                 )
-                if n.status in {NotificationStatus.SENT.value, NotificationStatus.DELIVERED.value}:
+                if n.status in {
+                    NotificationStatus.SENT.value,
+                    NotificationStatus.DELIVERED.value,
+                }:
                     referral.status = ReferralStatus.PATIENT_NOTIFIED.value
                     ctx.db.add(
                         ReferralEvent(
@@ -147,7 +214,10 @@ def create_clinical_review(ctx: AuthContext, req: ClinicalReviewCreate) -> Clini
                             to_status=ReferralStatus.PATIENT_NOTIFIED.value,
                             actor_user_id=ctx.user.id,
                             actor_label=ctx.user.email,
-                            details={"channel": req.notify_patient_channel.value, "notification_id": str(n.id)},
+                            details={
+                                "channel": req.notify_patient_channel.value,
+                                "notification_id": str(n.id),
+                            },
                         )
                     )
         elif req.decision == ReviewDecision.REJECT:
@@ -195,7 +265,12 @@ def create_clinical_review(ctx: AuthContext, req: ClinicalReviewCreate) -> Clini
     return review
 
 
-def list_reviews(ctx: AuthContext, params: PageParams, patient_id: uuid.UUID | None = None, run_id: uuid.UUID | None = None) -> dict:
+def list_reviews(
+    ctx: AuthContext,
+    params: PageParams,
+    patient_id: uuid.UUID | None = None,
+    run_id: uuid.UUID | None = None,
+) -> dict:
     ctx.require(P.REVIEWS_READ)
     stmt = select(ClinicalReview).where(ClinicalReview.organization_id == ctx.org_id)
     if patient_id:
@@ -235,12 +310,18 @@ def list_referrals(
         ctx.db,
         stmt,
         params,
-        sortable={"created_at": Referral.created_at, "sla_due_at": Referral.sla_due_at, "priority": Referral.priority},
+        sortable={
+            "created_at": Referral.created_at,
+            "sla_due_at": Referral.sla_due_at,
+            "priority": Referral.priority,
+        },
         default_sort=Referral.created_at.desc(),
     )
 
 
-def get_referral(ctx: AuthContext, referral_id: uuid.UUID) -> tuple[Referral, OutcomeVerification | None]:
+def get_referral(
+    ctx: AuthContext, referral_id: uuid.UUID
+) -> tuple[Referral, OutcomeVerification | None]:
     ctx.require(P.REFERRALS_READ)
     r = ctx.db.scalar(
         select(Referral)
@@ -249,18 +330,26 @@ def get_referral(ctx: AuthContext, referral_id: uuid.UUID) -> tuple[Referral, Ou
     )
     if r is None:
         raise NotFound("Referral not found")
-    ov = ctx.db.scalar(select(OutcomeVerification).where(OutcomeVerification.referral_id == r.id))
+    ov = ctx.db.scalar(
+        select(OutcomeVerification).where(OutcomeVerification.referral_id == r.id)
+    )
     return r, ov
 
 
 def create_referral(ctx: AuthContext, req: ReferralCreate) -> Referral:
     ctx.require(P.REFERRALS_WRITE)
     ctx.require_track(req.track.value)
-    p = ctx.db.scalar(select(Patient).where(Patient.id == req.patient_id, Patient.organization_id == ctx.org_id))
+    p = ctx.db.scalar(
+        select(Patient).where(
+            Patient.id == req.patient_id, Patient.organization_id == ctx.org_id
+        )
+    )
     if p is None:
         raise NotFound("Patient not found")
     now = utcnow()
-    sla_due = req.target_date or (now + timedelta(hours=48 if req.priority.value == "urgent" else 168))
+    sla_due = req.target_date or (
+        now + timedelta(hours=48 if req.priority.value == "urgent" else 168)
+    )
     facility = ctx.db.get(CareFacility, req.facility_id) if req.facility_id else None
     r = Referral(
         organization_id=ctx.org_id,
@@ -268,15 +357,23 @@ def create_referral(ctx: AuthContext, req: ReferralCreate) -> Referral:
         track=req.track.value,
         pathway=req.pathway.value,
         priority=req.priority.value,
-        status=ReferralStatus.APPROVED.value,
+        status=(
+            ReferralStatus.APPROVED.value
+            if ctx.has(P.REVIEWS_SIGN) and ctx.user.license_number
+            else ReferralStatus.PROPOSED.value
+        ),
         reason=req.reason,
         facility_id=facility.id if facility else None,
         insurance_plan_id=p.insurance_plan_id,
         coverage_status="unknown",
         owner_user_id=req.owner_user_id or ctx.user.id,
         owner_facility_label=facility.name if facility else None,
-        approved_by_id=ctx.user.id,
-        approved_at=now,
+        approved_by_id=(
+            ctx.user.id if ctx.has(P.REVIEWS_SIGN) and ctx.user.license_number else None
+        ),
+        approved_at=(
+            now if ctx.has(P.REVIEWS_SIGN) and ctx.user.license_number else None
+        ),
         target_date=sla_due,
         sla_due_at=sla_due,
         sla_status=SlaStatus.ON_TRACK.value,
@@ -294,20 +391,35 @@ def create_referral(ctx: AuthContext, req: ReferralCreate) -> Referral:
             details={"manual": True},
         )
     )
-    ctx.audit("referral.create", "referral", r.id, patient_id=p.id, details={"pathway": r.pathway})
+    ctx.audit(
+        "referral.create",
+        "referral",
+        r.id,
+        patient_id=p.id,
+        details={"pathway": r.pathway},
+    )
     ctx.db.commit()
     return r
 
 
-def notify_patient_for_referral(ctx: AuthContext, referral_id: uuid.UUID, req: ReferralNotifyRequest) -> tuple[Referral, Notification]:
+def notify_patient_for_referral(
+    ctx: AuthContext, referral_id: uuid.UUID, req: ReferralNotifyRequest
+) -> tuple[Referral, Notification]:
     ctx.require(P.REFERRALS_WRITE)
-    r = ctx.db.scalar(select(Referral).where(Referral.id == referral_id, Referral.organization_id == ctx.org_id))
+    r = ctx.db.scalar(
+        select(Referral)
+        .where(Referral.id == referral_id, Referral.organization_id == ctx.org_id)
+        .with_for_update()
+    )
     if r is None:
         raise NotFound("Referral not found")
     if r.status == ReferralStatus.PROPOSED.value:
-        raise ValidationFailed("Referral must be approved by a clinician before notifying the patient")
+        raise ValidationFailed(
+            "Referral must be approved by a clinician before notifying the patient"
+        )
     p = ctx.db.get(Patient, r.patient_id)
     assert p is not None
+    _check_external_consent(ctx.db, p, req.channel)
 
     n = dispatch_notification(
         ctx.db,
@@ -319,7 +431,10 @@ def notify_patient_for_referral(ctx: AuthContext, referral_id: uuid.UUID, req: R
         recipient_patient=p,
         referral_id=r.id,
     )
-    if n.status in {NotificationStatus.SENT.value, NotificationStatus.DELIVERED.value} and r.status == ReferralStatus.APPROVED.value:
+    if (
+        n.status in {NotificationStatus.SENT.value, NotificationStatus.DELIVERED.value}
+        and r.status == ReferralStatus.APPROVED.value
+    ):
         old = r.status
         r.status = ReferralStatus.PATIENT_NOTIFIED.value
         ctx.db.add(
@@ -330,7 +445,11 @@ def notify_patient_for_referral(ctx: AuthContext, referral_id: uuid.UUID, req: R
                 to_status=r.status,
                 actor_user_id=ctx.user.id,
                 actor_label=ctx.user.email,
-                details={"channel": req.channel.value, "notification_id": str(n.id), "delivery_status": n.status},
+                details={
+                    "channel": req.channel.value,
+                    "notification_id": str(n.id),
+                    "delivery_status": n.status,
+                },
             )
         )
     else:
@@ -342,27 +461,167 @@ def notify_patient_for_referral(ctx: AuthContext, referral_id: uuid.UUID, req: R
                 to_status=r.status,
                 actor_user_id=ctx.user.id,
                 actor_label=ctx.user.email,
-                details={"channel": req.channel.value, "notification_id": str(n.id), "delivery_status": n.status, "error": n.last_error},
+                details={
+                    "channel": req.channel.value,
+                    "notification_id": str(n.id),
+                    "delivery_status": n.status,
+                    "error": n.last_error,
+                },
             )
         )
-    ctx.audit("referral.notify", "referral", r.id, patient_id=r.patient_id, details={"channel": req.channel.value, "status": n.status})
+    ctx.audit(
+        "referral.notify",
+        "referral",
+        r.id,
+        patient_id=r.patient_id,
+        details={"channel": req.channel.value, "status": n.status},
+    )
     ctx.db.commit()
     return r, n
 
 
-def book_referral(ctx: AuthContext, referral_id: uuid.UUID, req: ReferralBookRequest) -> Referral:
+def _care_update(ctx, referral, event, key=None):
+    return _care_message(ctx.db, ctx.organization, referral, event, key)
+
+
+def _care_message(db, org, referral, event, key=None):
+    patient = db.get(Patient, referral.patient_id)
+    dispatch_notification(
+        db,
+        organization_id=org.id,
+        channel="in_app",
+        category="care_update",
+        subject="Your care plan was updated",
+        body=f"Your {event} has been recorded. Open My care for details.",
+        recipient_patient=patient,
+        referral_id=referral.id,
+        idempotency_key=f"{key}:inapp" if key else None,
+    )
+    from app.agents.gate1_consent import evaluate_consents
+
+    scopes, _ = evaluate_consents(db, patient, utcnow())
+    if "email" in (org.settings or {}).get("permitted_channels", []) and {
+        "data_processing",
+        "optional_channels",
+    }.issubset(scopes):
+        from app.services.messaging import public_link
+
+        dispatch_notification(
+            db,
+            organization_id=org.id,
+            channel="email",
+            category="care_update",
+            subject="Your Recova care plan was updated",
+            body=f'Your care team has updated your plan. Sign in to view details: {public_link("/portal")}',
+            recipient_patient=patient,
+            referral_id=referral.id,
+            idempotency_key=f"{key}:email" if key else None,
+        )
+
+
+def send_appointment_reminders(db, organization_id=None):
+    from app.models.identity import Organization
+
+    now = utcnow()
+    stmt = select(Referral).where(
+        Referral.status == "booked",
+        Referral.appointment_at > now,
+        Referral.appointment_at <= now + timedelta(hours=24),
+    )
+    if organization_id:
+        stmt = stmt.where(Referral.organization_id == organization_id)
+    for ref in db.scalars(stmt).all():
+        org = db.get(Organization, ref.organization_id)
+        if org and org.is_active:
+            _care_message(
+                db,
+                org,
+                ref,
+                "upcoming appointment",
+                f"appointment-reminder:{ref.id}:{ref.appointment_at.isoformat()}",
+            )
+
+
+def cancel_referral(ctx, referral_id, reason):
     ctx.require(P.REFERRALS_WRITE)
-    r = ctx.db.scalar(select(Referral).where(Referral.id == referral_id, Referral.organization_id == ctx.org_id))
+    ref = ctx.db.scalar(
+        select(Referral)
+        .where(Referral.id == referral_id, Referral.organization_id == ctx.org_id)
+        .with_for_update()
+    )
+    if ref is None:
+        raise NotFound("Referral not found")
+    if ref.closed_at or ref.status in (
+        "consultation_completed",
+        "outcome_verified",
+        "cancelled",
+        "rejected",
+    ):
+        raise ValidationFailed("Only an open referral can be cancelled")
+    old = ref.status
+    ref.status = "cancelled"
+    ref.closed_at = utcnow()
+    ctx.db.add(
+        ReferralEvent(
+            referral_id=ref.id,
+            event_type="cancelled",
+            from_status=old,
+            to_status="cancelled",
+            actor_user_id=ctx.user.id,
+            actor_label=ctx.user.email,
+            details={"reason": reason},
+        )
+    )
+    _care_update(ctx, ref, "appointment cancellation")
+    ctx.audit(
+        "referral.cancel",
+        "referral",
+        ref.id,
+        patient_id=ref.patient_id,
+        details={"reason": reason},
+    )
+    ctx.db.commit()
+    return ref
+
+
+def book_referral(
+    ctx: AuthContext, referral_id: uuid.UUID, req: ReferralBookRequest
+) -> Referral:
+    ctx.require(P.REFERRALS_WRITE)
+    r = ctx.db.scalar(
+        select(Referral)
+        .where(Referral.id == referral_id, Referral.organization_id == ctx.org_id)
+        .with_for_update()
+    )
     if r is None:
         raise NotFound("Referral not found")
-    if r.status in {ReferralStatus.PROPOSED.value, ReferralStatus.REJECTED.value, ReferralStatus.CANCELLED.value}:
+    if r.closed_at or r.status not in {
+        ReferralStatus.APPROVED.value,
+        ReferralStatus.PATIENT_NOTIFIED.value,
+        ReferralStatus.BOOKED.value,
+        ReferralStatus.MISSED.value,
+        ReferralStatus.ESCALATED.value,
+    }:
+        raise ValidationFailed(
+            "Only an approved open referral can be booked or rescheduled"
+        )
+    if r.status in {
+        ReferralStatus.PROPOSED.value,
+        ReferralStatus.REJECTED.value,
+        ReferralStatus.CANCELLED.value,
+    }:
         raise ValidationFailed(f"Cannot book referral in status '{r.status}'")
     old = r.status
     r.status = ReferralStatus.BOOKED.value
     r.appointment_at = req.appointment_at
     r.appointment_reference = req.appointment_reference
     if req.facility_id:
-        fac = ctx.db.scalar(select(CareFacility).where(CareFacility.id == req.facility_id, CareFacility.organization_id == ctx.org_id))
+        fac = ctx.db.scalar(
+            select(CareFacility).where(
+                CareFacility.id == req.facility_id,
+                CareFacility.organization_id == ctx.org_id,
+            )
+        )
         if fac is None:
             raise NotFound("Care facility not found")
         r.facility_id = fac.id
@@ -375,21 +634,42 @@ def book_referral(ctx: AuthContext, referral_id: uuid.UUID, req: ReferralBookReq
             to_status=r.status,
             actor_user_id=ctx.user.id,
             actor_label=ctx.user.email,
-            details={"appointment_at": req.appointment_at.isoformat(), "reference": req.appointment_reference, "notes": req.notes},
+            details={
+                "appointment_at": req.appointment_at.isoformat(),
+                "reference": req.appointment_reference,
+                "notes": req.notes,
+            },
         )
     )
     ctx.audit("referral.book", "referral", r.id, patient_id=r.patient_id)
+    _care_update(ctx, r, "appointment")
     ctx.db.commit()
     return r
 
 
-def complete_referral_consultation(ctx: AuthContext, referral_id: uuid.UUID, req: ReferralCompleteRequest) -> Referral:
+def complete_referral_consultation(
+    ctx: AuthContext, referral_id: uuid.UUID, req: ReferralCompleteRequest
+) -> Referral:
     ctx.require(P.REFERRALS_WRITE)
-    r = ctx.db.scalar(select(Referral).where(Referral.id == referral_id, Referral.organization_id == ctx.org_id))
+    r = ctx.db.scalar(
+        select(Referral)
+        .where(Referral.id == referral_id, Referral.organization_id == ctx.org_id)
+        .with_for_update()
+    )
     if r is None:
         raise NotFound("Referral not found")
-    if r.status in {ReferralStatus.PROPOSED.value, ReferralStatus.REJECTED.value, ReferralStatus.CANCELLED.value}:
-        raise ValidationFailed(f"Cannot mark consultation completed in status '{r.status}'")
+    if r.closed_at or r.status != ReferralStatus.BOOKED.value:
+        raise ValidationFailed(
+            "Book the referral before recording a completed consultation"
+        )
+    if r.status in {
+        ReferralStatus.PROPOSED.value,
+        ReferralStatus.REJECTED.value,
+        ReferralStatus.CANCELLED.value,
+    }:
+        raise ValidationFailed(
+            f"Cannot mark consultation completed in status '{r.status}'"
+        )
     old = r.status
     r.status = ReferralStatus.CONSULTATION_COMPLETED.value
     r.consultation_completed_at = req.completed_at or utcnow()
@@ -407,16 +687,27 @@ def complete_referral_consultation(ctx: AuthContext, referral_id: uuid.UUID, req
             details={"notes": req.notes},
         )
     )
-    ctx.audit("referral.complete_consultation", "referral", r.id, patient_id=r.patient_id)
+    ctx.audit(
+        "referral.complete_consultation", "referral", r.id, patient_id=r.patient_id
+    )
+    _care_update(ctx, r, "consultation")
     ctx.db.commit()
     return r
 
 
-def mark_referral_missed(ctx: AuthContext, referral_id: uuid.UUID, notes: str | None = None) -> Referral:
+def mark_referral_missed(
+    ctx: AuthContext, referral_id: uuid.UUID, notes: str | None = None
+) -> Referral:
     ctx.require(P.REFERRALS_WRITE)
-    r = ctx.db.scalar(select(Referral).where(Referral.id == referral_id, Referral.organization_id == ctx.org_id))
+    r = ctx.db.scalar(
+        select(Referral)
+        .where(Referral.id == referral_id, Referral.organization_id == ctx.org_id)
+        .with_for_update()
+    )
     if r is None:
         raise NotFound("Referral not found")
+    if r.closed_at or r.status != ReferralStatus.BOOKED.value:
+        raise ValidationFailed("Only a booked open referral can be marked missed")
     old = r.status
     r.status = ReferralStatus.MISSED.value
     r.escalation_level += 1
@@ -432,19 +723,54 @@ def mark_referral_missed(ctx: AuthContext, referral_id: uuid.UUID, notes: str | 
         )
     )
     ctx.audit("referral.missed", "referral", r.id, patient_id=r.patient_id)
+    _care_update(ctx, r, "follow-up task")
     ctx.db.commit()
     return r
 
 
-def verify_referral_outcome(ctx: AuthContext, referral_id: uuid.UUID, req: OutcomeVerificationCreate) -> OutcomeVerification:
+def verify_referral_outcome(
+    ctx: AuthContext, referral_id: uuid.UUID, req: OutcomeVerificationCreate
+) -> OutcomeVerification:
     ctx.require(P.OUTCOMES_VERIFY)
-    r = ctx.db.scalar(select(Referral).where(Referral.id == referral_id, Referral.organization_id == ctx.org_id))
+    if not ctx.has(P.REVIEWS_SIGN) or not (ctx.user.license_number or "").strip():
+        raise ValidationFailed(
+            "A recorded practitioner licence and clinical sign-off permission are required"
+        )
+    r = ctx.db.scalar(
+        select(Referral)
+        .where(Referral.id == referral_id, Referral.organization_id == ctx.org_id)
+        .with_for_update()
+    )
     if r is None:
         raise NotFound("Referral not found")
-    existing = ctx.db.scalar(select(OutcomeVerification).where(OutcomeVerification.referral_id == r.id))
+    if (
+        r.status != ReferralStatus.CONSULTATION_COMPLETED.value
+        or not r.consultation_completed_at
+    ):
+        raise ValidationFailed(
+            "A completed consultation is required before verifying its clinical outcome"
+        )
+    if req.follow_up_run_id:
+        follow_up = ctx.db.get(PipelineRun, req.follow_up_run_id)
+        if (
+            not follow_up
+            or follow_up.organization_id != ctx.org_id
+            or follow_up.patient_id != r.patient_id
+            or follow_up.track != r.track
+        ):
+            raise ValidationFailed(
+                "Follow-up run must belong to the same patient, facility and programme"
+            )
+    existing = ctx.db.scalar(
+        select(OutcomeVerification).where(OutcomeVerification.referral_id == r.id)
+    )
     if existing is not None:
         raise Conflict("Outcome has already been verified for this referral")
-    if r.status in {ReferralStatus.PROPOSED.value, ReferralStatus.REJECTED.value, ReferralStatus.CANCELLED.value}:
+    if r.status in {
+        ReferralStatus.PROPOSED.value,
+        ReferralStatus.REJECTED.value,
+        ReferralStatus.CANCELLED.value,
+    }:
         raise ValidationFailed(f"Cannot verify outcome while referral is '{r.status}'")
 
     now = utcnow()
@@ -476,7 +802,13 @@ def verify_referral_outcome(ctx: AuthContext, referral_id: uuid.UUID, req: Outco
             details={"outcome": req.outcome, "method": req.verification_method},
         )
     )
-    ctx.audit("outcome.verify", "outcome_verification", ov.id, patient_id=r.patient_id, details={"outcome": req.outcome})
+    ctx.audit(
+        "outcome.verify",
+        "outcome_verification",
+        ov.id,
+        patient_id=r.patient_id,
+        details={"outcome": req.outcome},
+    )
     ctx.db.commit()
     return ov
 
@@ -501,7 +833,11 @@ def evaluate_referral_slas(db, *, organization_id: uuid.UUID | None = None) -> d
 
     for r in refs:
         # Detect past-due booked appointments
-        if r.status == ReferralStatus.BOOKED.value and r.appointment_at and r.appointment_at + timedelta(hours=2) < now:
+        if (
+            r.status == ReferralStatus.BOOKED.value
+            and r.appointment_at
+            and r.appointment_at + timedelta(hours=2) < now
+        ):
             old = r.status
             r.status = ReferralStatus.MISSED.value
             r.escalation_level += 1
@@ -547,28 +883,49 @@ def evaluate_referral_slas(db, *, organization_id: uuid.UUID | None = None) -> d
                         from_status=old,
                         to_status=r.status,
                         actor_label="system:sla_monitor",
-                        details={"sla_due_at": r.sla_due_at.isoformat(), "reason": "SLA breached"},
+                        details={
+                            "sla_due_at": r.sla_due_at.isoformat(),
+                            "reason": "SLA breached",
+                        },
                     )
                 )
-            elif r.sla_due_at - now <= timedelta(hours=12) and r.sla_status == SlaStatus.ON_TRACK.value:
+            elif (
+                r.sla_due_at - now <= timedelta(hours=12)
+                and r.sla_status == SlaStatus.ON_TRACK.value
+            ):
                 r.sla_status = SlaStatus.AT_RISK.value
                 at_risk += 1
 
     db.commit()
-    return {"checked": len(refs), "escalated": escalated, "at_risk": at_risk, "missed_detected": missed_detected}
+    return {
+        "checked": len(refs),
+        "escalated": escalated,
+        "at_risk": at_risk,
+        "missed_detected": missed_detected,
+    }
 
 
-def list_emergencies(ctx: AuthContext, status: str | None = None) -> list[EmergencyEvent]:
+def list_emergencies(
+    ctx: AuthContext, status: str | None = None
+) -> list[EmergencyEvent]:
     ctx.require(P.PIPELINE_READ)
     stmt = select(EmergencyEvent).where(EmergencyEvent.organization_id == ctx.org_id)
     if status:
         stmt = stmt.where(EmergencyEvent.status == status)
-    return list(ctx.db.scalars(stmt.order_by(EmergencyEvent.created_at.desc()).limit(100)).all())
+    return list(
+        ctx.db.scalars(stmt.order_by(EmergencyEvent.created_at.desc()).limit(100)).all()
+    )
 
 
-def resolve_emergency(ctx: AuthContext, event_id: uuid.UUID, req: EmergencyResolveRequest) -> EmergencyEvent:
+def resolve_emergency(
+    ctx: AuthContext, event_id: uuid.UUID, req: EmergencyResolveRequest
+) -> EmergencyEvent:
     ctx.require(P.REVIEWS_SIGN)
-    ev = ctx.db.scalar(select(EmergencyEvent).where(EmergencyEvent.id == event_id, EmergencyEvent.organization_id == ctx.org_id))
+    ev = ctx.db.scalar(
+        select(EmergencyEvent).where(
+            EmergencyEvent.id == event_id, EmergencyEvent.organization_id == ctx.org_id
+        )
+    )
     if ev is None:
         raise NotFound("Emergency event not found")
     now = utcnow()
@@ -585,12 +942,20 @@ def resolve_emergency(ctx: AuthContext, event_id: uuid.UUID, req: EmergencyResol
         ev.resolved_at = now
     if req.notes:
         ev.resolution_notes = req.notes
-    ctx.audit(f"emergency.{req.action}", "emergency_event", ev.id, patient_id=ev.patient_id, details={"notes": req.notes})
+    ctx.audit(
+        f"emergency.{req.action}",
+        "emergency_event",
+        ev.id,
+        patient_id=ev.patient_id,
+        details={"notes": req.notes},
+    )
     ctx.db.commit()
     return ev
 
 
-def list_interventions(ctx: AuthContext, track: str | None = None, department_id: uuid.UUID | None = None) -> list[Intervention]:
+def list_interventions(
+    ctx: AuthContext, track: str | None = None, department_id: uuid.UUID | None = None
+) -> list[Intervention]:
     ctx.require(P.INTERVENTIONS_READ)
     stmt = select(Intervention).where(Intervention.organization_id == ctx.org_id)
     if track:
@@ -598,7 +963,9 @@ def list_interventions(ctx: AuthContext, track: str | None = None, department_id
         stmt = stmt.where(Intervention.track == track)
     if department_id:
         stmt = stmt.where(Intervention.department_id == department_id)
-    return list(ctx.db.scalars(stmt.order_by(Intervention.created_at.desc()).limit(100)).all())
+    return list(
+        ctx.db.scalars(stmt.order_by(Intervention.created_at.desc()).limit(100)).all()
+    )
 
 
 def create_intervention(ctx: AuthContext, req: InterventionCreate) -> Intervention:
@@ -625,9 +992,16 @@ def create_intervention(ctx: AuthContext, req: InterventionCreate) -> Interventi
     return iv
 
 
-def update_intervention(ctx: AuthContext, intervention_id: uuid.UUID, req: InterventionUpdateRequest) -> Intervention:
+def update_intervention(
+    ctx: AuthContext, intervention_id: uuid.UUID, req: InterventionUpdateRequest
+) -> Intervention:
     ctx.require(P.INTERVENTIONS_WRITE)
-    iv = ctx.db.scalar(select(Intervention).where(Intervention.id == intervention_id, Intervention.organization_id == ctx.org_id))
+    iv = ctx.db.scalar(
+        select(Intervention).where(
+            Intervention.id == intervention_id,
+            Intervention.organization_id == ctx.org_id,
+        )
+    )
     if iv is None:
         raise NotFound("Intervention not found")
     iv.status = req.status.value
@@ -636,19 +1010,35 @@ def update_intervention(ctx: AuthContext, intervention_id: uuid.UUID, req: Inter
     if req.status == InterventionStatus.COMPLETED:
         iv.completed_at = utcnow()
         iv.completed_by_id = ctx.user.id
-    ctx.audit("intervention.update", "intervention", iv.id, details={"status": iv.status})
+    ctx.audit(
+        "intervention.update", "intervention", iv.id, details={"status": iv.status}
+    )
     ctx.db.commit()
     return iv
 
 
 def list_insurance_plans(ctx: AuthContext) -> list[InsurancePlan]:
     ctx.require(P.ORG_READ)
-    return list(ctx.db.scalars(select(InsurancePlan).where(InsurancePlan.organization_id == ctx.org_id, InsurancePlan.is_active.is_(True)).order_by(InsurancePlan.name)).all())
+    return list(
+        ctx.db.scalars(
+            select(InsurancePlan)
+            .where(
+                InsurancePlan.organization_id == ctx.org_id,
+                InsurancePlan.is_active.is_(True),
+            )
+            .order_by(InsurancePlan.name)
+        ).all()
+    )
 
 
 def create_insurance_plan(ctx: AuthContext, req: InsurancePlanCreate) -> InsurancePlan:
     ctx.require(P.SETTINGS_MANAGE)
-    existing = ctx.db.scalar(select(InsurancePlan.id).where(InsurancePlan.organization_id == ctx.org_id, InsurancePlan.code == req.code.strip()))
+    existing = ctx.db.scalar(
+        select(InsurancePlan.id).where(
+            InsurancePlan.organization_id == ctx.org_id,
+            InsurancePlan.code == req.code.strip(),
+        )
+    )
     if existing:
         raise Conflict("Insurance plan code already exists")
     plan = InsurancePlan(
@@ -663,19 +1053,35 @@ def create_insurance_plan(ctx: AuthContext, req: InsurancePlanCreate) -> Insuran
     )
     ctx.db.add(plan)
     ctx.db.flush()
-    ctx.audit("insurance_plan.create", "insurance_plan", plan.id, details={"code": plan.code})
+    ctx.audit(
+        "insurance_plan.create", "insurance_plan", plan.id, details={"code": plan.code}
+    )
     ctx.db.commit()
     return plan
 
 
 def list_care_facilities(ctx: AuthContext) -> list[CareFacility]:
     ctx.require(P.ORG_READ)
-    return list(ctx.db.scalars(select(CareFacility).where(CareFacility.organization_id == ctx.org_id, CareFacility.is_active.is_(True)).order_by(CareFacility.name)).all())
+    return list(
+        ctx.db.scalars(
+            select(CareFacility)
+            .where(
+                CareFacility.organization_id == ctx.org_id,
+                CareFacility.is_active.is_(True),
+            )
+            .order_by(CareFacility.name)
+        ).all()
+    )
 
 
 def create_care_facility(ctx: AuthContext, req: CareFacilityCreate) -> CareFacility:
     ctx.require(P.SETTINGS_MANAGE)
-    existing = ctx.db.scalar(select(CareFacility.id).where(CareFacility.organization_id == ctx.org_id, CareFacility.name == req.name.strip()))
+    existing = ctx.db.scalar(
+        select(CareFacility.id).where(
+            CareFacility.organization_id == ctx.org_id,
+            CareFacility.name == req.name.strip(),
+        )
+    )
     if existing:
         raise Conflict("Care facility with that name already exists")
     fac = CareFacility(
@@ -693,7 +1099,9 @@ def create_care_facility(ctx: AuthContext, req: CareFacilityCreate) -> CareFacil
     )
     ctx.db.add(fac)
     ctx.db.flush()
-    ctx.audit("care_facility.create", "care_facility", fac.id, details={"name": fac.name})
+    ctx.audit(
+        "care_facility.create", "care_facility", fac.id, details={"name": fac.name}
+    )
     ctx.db.commit()
     return fac
 
@@ -713,10 +1121,18 @@ def list_notifications(ctx: AuthContext, params: PageParams) -> dict:
 
 
 def mark_notification_read(ctx: AuthContext, notif_id: uuid.UUID) -> Notification:
-    n = ctx.db.scalar(select(Notification).where(Notification.id == notif_id, Notification.organization_id == ctx.org_id))
+    n = ctx.db.scalar(
+        select(Notification).where(
+            Notification.id == notif_id, Notification.organization_id == ctx.org_id
+        )
+    )
     if n is None:
         raise NotFound("Notification not found")
-    if n.recipient_user_id and n.recipient_user_id != ctx.user.id and not ctx.has(P.ORG_MANAGE):
+    if (
+        n.recipient_user_id
+        and n.recipient_user_id != ctx.user.id
+        and not ctx.has(P.ORG_MANAGE)
+    ):
         raise NotFound("Notification not found")
     if not n.read_at:
         n.read_at = utcnow()
@@ -731,20 +1147,34 @@ def list_integrations(ctx: AuthContext) -> list[dict]:
     s = get_settings()
     rows = {
         c.integration: c
-        for c in ctx.db.scalars(select(IntegrationConfig).where(IntegrationConfig.organization_id == ctx.org_id)).all()
+        for c in ctx.db.scalars(
+            select(IntegrationConfig).where(
+                IntegrationConfig.organization_id == ctx.org_id
+            )
+        ).all()
     }
     env_flags = {
         "llm": s.llm_configured,
         "smtp": s.smtp_configured,
         "twilio": s.twilio_configured,
-        "malaffi": bool(s.malaffi_base_url and s.malaffi_client_id and s.malaffi_client_secret),
+        "malaffi": bool(
+            s.malaffi_base_url and s.malaffi_client_id and s.malaffi_client_secret
+        ),
         "sahatna": bool(s.sahatna_base_url and s.sahatna_api_key),
     }
     out = []
     for name in ("llm", "malaffi", "sahatna", "smtp", "twilio"):
         c = rows.get(name)
         env_ok = env_flags[name]
-        status = c.status if c else (IntegrationStatus.CONFIGURED.value if env_ok else IntegrationStatus.NOT_CONFIGURED.value)
+        status = (
+            c.status
+            if c
+            else (
+                IntegrationStatus.CONFIGURED.value
+                if env_ok
+                else IntegrationStatus.NOT_CONFIGURED.value
+            )
+        )
         out.append(
             {
                 "integration": name,
@@ -760,12 +1190,17 @@ def list_integrations(ctx: AuthContext) -> list[dict]:
     return out
 
 
-def upsert_integration(ctx: AuthContext, name: str, req: IntegrationConfigUpdate) -> dict:
+def upsert_integration(
+    ctx: AuthContext, name: str, req: IntegrationConfigUpdate
+) -> dict:
     ctx.require(P.SETTINGS_MANAGE)
     if name not in {"llm", "malaffi", "sahatna", "smtp", "twilio"}:
         raise ValidationFailed(f"Unsupported integration: {name}")
     row = ctx.db.scalar(
-        select(IntegrationConfig).where(IntegrationConfig.organization_id == ctx.org_id, IntegrationConfig.integration == name)
+        select(IntegrationConfig).where(
+            IntegrationConfig.organization_id == ctx.org_id,
+            IntegrationConfig.integration == name,
+        )
     )
     if row is None:
         row = IntegrationConfig(organization_id=ctx.org_id, integration=name)
@@ -774,8 +1209,16 @@ def upsert_integration(ctx: AuthContext, name: str, req: IntegrationConfigUpdate
     row.settings = req.settings
     if req.secrets is not None:
         row.secrets_encrypted = encrypt_str(json.dumps(req.secrets))
-    row.status = IntegrationStatus.CONFIGURED.value if req.enabled else IntegrationStatus.DISABLED.value
-    ctx.audit("integration.update", "integration_config", details={"integration": name, "enabled": req.enabled})
+    row.status = (
+        IntegrationStatus.CONFIGURED.value
+        if req.enabled
+        else IntegrationStatus.DISABLED.value
+    )
+    ctx.audit(
+        "integration.update",
+        "integration_config",
+        details={"integration": name, "enabled": req.enabled},
+    )
     ctx.db.commit()
     return [x for x in list_integrations(ctx) if x["integration"] == name][0]
 
@@ -783,7 +1226,10 @@ def upsert_integration(ctx: AuthContext, name: str, req: IntegrationConfigUpdate
 def test_integration(ctx: AuthContext, name: str) -> dict:
     ctx.require(P.SETTINGS_MANAGE)
     row = ctx.db.scalar(
-        select(IntegrationConfig).where(IntegrationConfig.organization_id == ctx.org_id, IntegrationConfig.integration == name)
+        select(IntegrationConfig).where(
+            IntegrationConfig.organization_id == ctx.org_id,
+            IntegrationConfig.integration == name,
+        )
     )
     org_cfg = dict(row.settings) if row else {}
     if row and row.secrets_encrypted:
@@ -808,39 +1254,60 @@ def test_integration(ctx: AuthContext, name: str) -> dict:
         provider = org_cfg.get("provider") or s.llm_provider
         has_key = bool(org_cfg.get("api_key") or s.llm_api_key)
         res = (
-            {"status": IntegrationStatus.CONFIGURED.value, "connected": True, "message": f"LLM provider '{provider}' credentials configured."}
+            {
+                "status": IntegrationStatus.CONFIGURED.value,
+                "connected": False,
+                "message": f"LLM provider '{provider}' credentials saved. A consented synthesis is needed to verify a response.",
+            }
             if provider != "none" and has_key
-            else {"status": IntegrationStatus.NOT_CONFIGURED.value, "connected": False, "message": "No LLM provider API key configured."}
+            else {
+                "status": IntegrationStatus.NOT_CONFIGURED.value,
+                "connected": False,
+                "message": "No LLM provider API key configured.",
+            }
         )
     elif name == "smtp":
-        from app.core.config import get_settings
+        from app.integrations.notifications import test_smtp_connection
 
-        s = get_settings()
-        ok = bool((org_cfg.get("host") or s.smtp_host) and (org_cfg.get("from_address") or s.smtp_from))
-        res = (
-            {"status": IntegrationStatus.CONFIGURED.value, "connected": True, "message": "SMTP host and sender configured."}
-            if ok
-            else {"status": IntegrationStatus.NOT_CONFIGURED.value, "connected": False, "message": "SMTP host/sender not configured."}
-        )
+        res = test_smtp_connection(org_cfg)
     elif name == "twilio":
         from app.core.config import get_settings
 
         s = get_settings()
-        ok = bool((org_cfg.get("account_sid") or s.twilio_account_sid) and (org_cfg.get("auth_token") or s.twilio_auth_token))
+        ok = bool(
+            (org_cfg.get("account_sid") or s.twilio_account_sid)
+            and (org_cfg.get("auth_token") or s.twilio_auth_token)
+        )
         res = (
-            {"status": IntegrationStatus.CONFIGURED.value, "connected": True, "message": "Twilio credentials configured."}
+            {
+                "status": IntegrationStatus.CONFIGURED.value,
+                "connected": False,
+                "message": "Twilio credentials saved. An approved test message is needed to verify delivery.",
+            }
             if ok
-            else {"status": IntegrationStatus.NOT_CONFIGURED.value, "connected": False, "message": "Twilio credentials not configured."}
+            else {
+                "status": IntegrationStatus.NOT_CONFIGURED.value,
+                "connected": False,
+                "message": "Twilio credentials not configured.",
+            }
         )
     else:
         raise ValidationFailed(f"Unsupported integration: {name}")
 
     if row is None:
-        row = IntegrationConfig(organization_id=ctx.org_id, integration=name, enabled=res.get("connected", False))
+        row = IntegrationConfig(
+            organization_id=ctx.org_id,
+            integration=name,
+            enabled=res.get("connected", False),
+        )
         ctx.db.add(row)
     row.status = res["status"]
     row.last_tested_at = utcnow()
     row.last_test_result = res
-    ctx.audit("integration.test", "integration_config", details={"integration": name, "status": res["status"]})
+    ctx.audit(
+        "integration.test",
+        "integration_config",
+        details={"integration": name, "status": res["status"]},
+    )
     ctx.db.commit()
     return res

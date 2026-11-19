@@ -1,114 +1,49 @@
 "use client";
-
-import React, { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CheckCircle2, KeyRound, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { authService } from "@/services/auth";
-import { RecovaMark } from "@/components/RecovaMark";
-import { Alert } from "@/components/ui/alert";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Alert } from "@/components/ui/alert";
 
-function AcceptInvitationContent() {
+function Setup() {
+  const token = useSearchParams().get("token") || "";
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const { session, loading, refreshSession } = useAuth();
-  const [token, setToken] = useState(() => searchParams.get("token") || "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [accepted, setAccepted] = useState(false);
-
-  const handleAccept = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!token.trim()) {
-      setError("Enter the portal invitation token issued by your care facility.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
+  const { session, refreshSession, logout } = useAuth();
+  const [details,setDetails] = useState<{facility:string;email_masked:string;existing_account:boolean;used:boolean}|null>(null);
+  const [name,setName]=useState("");const [password,setPassword]=useState("");const [repeat,setRepeat]=useState("");
+  const [error,setError]=useState("");const [busy,setBusy]=useState(false);
+  useEffect(()=>{
+    let active=true;
+    api.post<{facility:string;email_masked:string;existing_account:boolean;used:boolean}>("/auth/portal-invitations/inspect", {token})
+      .then(d=>{if(active)setDetails(d)})
+      .catch(e=>{if(active)setError(e instanceof Error?e.message:"Invitation unavailable")});
+    return ()=>{active=false};
+  },[token]);
+  async function accept(e:React.FormEvent){
+    e.preventDefault();setError("");setBusy(true);
     try {
-      await authService.acceptPortalInvitation(token.trim());
-      setAccepted(true);
-      await refreshSession();
-      router.replace("/portal");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not verify portal invitation.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f0f6f9]">
-        <Loader2 className="h-5 w-5 animate-spin text-[#003e5e]" />
-      </div>
-    );
+      if (session) await authService.acceptPortalInvitation(token);
+      else {
+        if(password!==repeat)throw new Error("Passwords do not match");
+        await authService.completePortalInvitation({token,new_password:password,full_name:name});
+      }
+      await refreshSession();router.replace("/portal");
+    } catch(e){setError(e instanceof Error?e.message:"Could not complete setup")} finally{setBusy(false)}
   }
-
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f0f6f9] p-4">
-      <Card className="w-full max-w-md border-[#e2edf2] bg-white">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-xl bg-[#003e5e] text-[#aeff9a]">
-            <RecovaMark size={26} />
-          </div>
-          <CardTitle>Link Your Participant Portal</CardTitle>
-          <CardDescription>
-            Verify your single-use, recipient-bound facility invitation token to link your care record.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {!session ? (
-            <div className="space-y-3 text-center text-xs text-slate-600">
-              <Alert variant="info">
-                Sign in with the email address your care facility invited, then return here to verify your invitation token.
-              </Alert>
-              <Link href="/login">
-                <Button className="w-full">Sign In to Continue</Button>
-              </Link>
-            </div>
-          ) : (
-            <form onSubmit={handleAccept} className="space-y-4">
-              {error && <Alert variant="danger">{error}</Alert>}
-              {accepted && (
-                <Alert variant="success">
-                  <CheckCircle2 className="inline h-4 w-4 mr-1" />
-                  Invitation verified! Redirecting to your portal...
-                </Alert>
-              )}
-              <div className="rounded-lg bg-[#f8fbfc] p-3 text-xs text-[#5a7d93]">
-                Signed in as <strong className="text-[#011621]">{session.user.email}</strong>
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="invite_token">Invitation Token</Label>
-                <Input
-                  id="invite_token"
-                  required
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  placeholder="Paste your 72h portal invitation token"
-                />
-              </div>
-              <Button type="submit" disabled={busy} className="w-full">
-                <KeyRound className="h-4 w-4" />
-                {busy ? "Verifying..." : "Verify & Link My Care Record"}
-              </Button>
-            </form>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
+  const next=`/accept-invitation?token=${encodeURIComponent(token)}`;
+  return <main className="flex min-h-screen items-center justify-center bg-slate-100 p-4"><Card className="w-full max-w-md">
+    <CardHeader><CardTitle>Your Recova patient portal</CardTitle><CardDescription>{details?`${details.facility} invited ${details.email_masked}. Your care stays linked to this facility.`:"Checking your private invitation…"}</CardDescription></CardHeader>
+    <CardContent className="space-y-4">
+      {error&&<Alert variant="danger">{error} Ask your facility to resend the invitation if it expired.</Alert>}
+      {details&&(session?<form onSubmit={accept} className="space-y-4"><p className="text-sm">Signed in as {session.user.email}</p><Button disabled={busy} type="submit">{busy?"Linking…":"Accept invitation and open portal"}</Button><Button type="button" variant="ghost" onClick={()=>void logout()}>Use a different account</Button></form>:
+        details.existing_account?<><p className="text-sm">Use your existing password. Accepting this invitation will add this facility to your patient portal.</p><Link href={`/login?next=${encodeURIComponent(next)}`}><Button>Sign in to accept</Button></Link><Link className="block text-sm underline" href="/forgot-password">Forgot password?</Link></>:
+        <form onSubmit={accept} className="space-y-4"><div><Label htmlFor="setup-name">Your full name</Label><Input id="setup-name" value={name} onChange={e=>setName(e.target.value)} required minLength={2} autoComplete="name"/></div><div><Label htmlFor="setup-password">Create your password</Label><Input id="setup-password" type="password" value={password} onChange={e=>setPassword(e.target.value)} required minLength={10} autoComplete="new-password"/><p className="mt-1 text-xs text-slate-500">At least 10 characters, including a letter and number.</p></div><div><Label htmlFor="setup-repeat">Confirm password</Label><Input id="setup-repeat" type="password" value={repeat} onChange={e=>setRepeat(e.target.value)} required autoComplete="new-password"/></div><Button className="w-full" disabled={busy} type="submit">{busy?"Setting up…":"Set up my portal"}</Button></form>)}
+      <Link className="block text-sm underline" href="/login">Back to sign in</Link>
+    </CardContent></Card></main>;
 }
-
-export default function AcceptInvitationPage() {
-  return (
-    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-[#f0f6f9]" />}>
-      <AcceptInvitationContent />
-    </Suspense>
-  );
-}
+export default function AcceptInvitationPage(){return <Suspense fallback={<p className="p-6">Loading invitation…</p>}><Setup/></Suspense>}

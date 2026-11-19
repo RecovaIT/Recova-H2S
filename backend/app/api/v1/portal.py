@@ -37,14 +37,16 @@ from app.models.clinical import (
 )
 from app.models.engine import ClinicalSynthesis
 from app.models.enums import ConsentScope, NoticeRecipientState, ObservationSource
-from app.models.identity import Organization, ParticipantAccountLink, User
+from app.models.identity import Organization, ParticipantAccountLink, User, Membership
 from app.models.ops import NoticeAcknowledgement, NoticeRecipient, PublicHealthNotice
 from app.schemas.clinical import CognitiveTrialInput
 
 router = APIRouter(prefix="/portal", tags=["Participant portal"])
 
 
-def _all_participant_enrolments(ctx: AuthContext) -> list[tuple[Patient, TrackEnrollment, Organization]]:
+def _all_participant_enrolments(
+    ctx: AuthContext,
+) -> list[tuple[Patient, TrackEnrollment, Organization]]:
     links = ctx.db.scalars(
         select(ParticipantAccountLink).where(
             ParticipantAccountLink.user_id == ctx.user_id,
@@ -53,7 +55,9 @@ def _all_participant_enrolments(ctx: AuthContext) -> list[tuple[Patient, TrackEn
     ).all()
     patient_ids = [lnk.patient_id for lnk in links]
     fallback_patients = ctx.db.scalars(
-        select(Patient).where(Patient.portal_user_id == ctx.user_id, Patient.is_active.is_(True))
+        select(Patient).where(
+            Patient.portal_user_id == ctx.user_id, Patient.is_active.is_(True)
+        )
     ).all()
     for p in fallback_patients:
         if p.id not in patient_ids:
@@ -63,7 +67,9 @@ def _all_participant_enrolments(ctx: AuthContext) -> list[tuple[Patient, TrackEn
     patients = {
         p.id: p
         for p in ctx.db.scalars(
-            select(Patient).where(Patient.id.in_(patient_ids), Patient.is_active.is_(True))
+            select(Patient).where(
+                Patient.id.in_(patient_ids), Patient.is_active.is_(True)
+            )
         ).all()
     }
     if not patients:
@@ -77,22 +83,37 @@ def _all_participant_enrolments(ctx: AuthContext) -> list[tuple[Patient, TrackEn
         .order_by(TrackEnrollment.enrolled_at.asc())
     ).all()
     org_ids = list({e.organization_id for e in enrollments})
-    orgs = {
-        o.id: o
-        for o in ctx.db.scalars(
-            select(Organization).where(Organization.id.in_(org_ids), Organization.is_active.is_(True))
-        ).all()
-    } if org_ids else {}
+    permitted_orgs = set(
+        ctx.db.scalars(
+            select(Membership.organization_id).where(
+                Membership.user_id == ctx.user_id, Membership.is_active.is_(True)
+            )
+        )
+    )
+    orgs = (
+        {
+            o.id: o
+            for o in ctx.db.scalars(
+                select(Organization).where(
+                    Organization.id.in_(org_ids), Organization.is_active.is_(True)
+                )
+            ).all()
+        }
+        if org_ids
+        else {}
+    )
     out: list[tuple[Patient, TrackEnrollment, Organization]] = []
     for enr in enrollments:
         p = patients.get(enr.patient_id)
         org = orgs.get(enr.organization_id)
-        if p is not None and org is not None:
+        if p is not None and org is not None and org.id in permitted_orgs:
             out.append((p, enr, org))
     return out
 
 
-def own_records(ctx: AuthContext, enrolment_id: uuid.UUID | None = None) -> tuple[Patient, TrackEnrollment]:
+def own_records(
+    ctx: AuthContext, enrolment_id: uuid.UUID | None = None
+) -> tuple[Patient, TrackEnrollment]:
     all_enr = _all_participant_enrolments(ctx)
     if enrolment_id is not None:
         match = next(((p, e, o) for p, e, o in all_enr if e.id == enrolment_id), None)
@@ -117,10 +138,14 @@ def own_records(ctx: AuthContext, enrolment_id: uuid.UUID | None = None) -> tupl
         )
         if link is not None:
             patient = ctx.db.scalar(
-                select(Patient).where(Patient.id == link.patient_id, Patient.is_active.is_(True))
+                select(Patient).where(
+                    Patient.id == link.patient_id, Patient.is_active.is_(True)
+                )
             )
     if patient is None:
-        raise NotFound("Your facility has not linked a participant record to this account")
+        raise NotFound(
+            "Your facility has not linked a participant record to this account"
+        )
     enrollment = ctx.db.scalar(
         select(TrackEnrollment).where(
             TrackEnrollment.patient_id == patient.id,
@@ -129,18 +154,27 @@ def own_records(ctx: AuthContext, enrolment_id: uuid.UUID | None = None) -> tupl
         )
     )
     if enrollment is None:
-        raise NotFound("Your facility has no active programme enrolment for this account")
+        raise NotFound(
+            "Your facility has no active programme enrolment for this account"
+        )
     return patient, enrollment
 
 
-def _notice_visible_to_org_and_track(notice: PublicHealthNotice, org: Organization | None, track: str, now: datetime) -> bool:
+def _notice_visible_to_org_and_track(
+    notice: PublicHealthNotice, org: Organization | None, track: str, now: datetime
+) -> bool:
     if notice.status != "published":
         return False
     if notice.starts_at and notice.starts_at > now:
         return False
     if notice.expires_at and notice.expires_at < now:
         return False
-    if notice.scope_emirate and org and org.emirate and notice.scope_emirate.lower() != org.emirate.lower():
+    if (
+        notice.scope_emirate
+        and org
+        and org.emirate
+        and notice.scope_emirate.lower() != org.emirate.lower()
+    ):
         return False
     if notice.facility_ids and org and str(org.id) not in set(notice.facility_ids):
         return False
@@ -159,9 +193,42 @@ def overview(
     org_id = enrollment.organization_id
     all_enr = _all_participant_enrolments(ctx)
 
-    clinician = ctx.db.get(User, patient.primary_clinician_id) if patient.primary_clinician_id else None
+    clinician = (
+        ctx.db.scalar(
+            select(User)
+            .join(Membership, Membership.user_id == User.id)
+            .where(
+                User.id == patient.primary_clinician_id,
+                User.is_active.is_(True),
+                User.license_number.is_not(None),
+                User.license_number != "",
+                Membership.organization_id == org_id,
+                Membership.is_active.is_(True),
+                Membership.role.in_(
+                    [
+                        "clinician",
+                        "psychiatrist",
+                        "occ_health_director",
+                        "org_admin",
+                        "platform_admin",
+                    ]
+                ),
+            )
+        )
+        if patient.primary_clinician_id
+        else None
+    )
     care_contact = {
-        "name": clinician.full_name if clinician else (org.settings.get("responsible_contact", {}).get("name") if org and org.settings else None) or "Assigned Care Team",
+        "name": (
+            clinician.full_name
+            if clinician
+            else (
+                org.settings.get("responsible_contact", {}).get("name")
+                if org and org.settings
+                else None
+            )
+            or "Assigned Care Team"
+        ),
         "role": "Primary Clinician" if clinician else "Facility Care Desk",
         "facility": org.name if org else None,
     }
@@ -201,6 +268,9 @@ def overview(
                         "booked",
                         "consultation_completed",
                         "outcome_verified",
+                        "cancelled",
+                        "missed",
+                        "escalated",
                     ]
                 ),
             )
@@ -221,7 +291,9 @@ def overview(
     acked_live = set(
         str(nid)
         for nid in ctx.db.scalars(
-            select(NoticeAcknowledgement.notice_id).where(NoticeAcknowledgement.user_id == ctx.user.id)
+            select(NoticeAcknowledgement.notice_id).where(
+                NoticeAcknowledgement.user_id == ctx.user.id
+            )
         )
     )
     merged_notices = list(enrollment.context.get("portal_notices", []))
@@ -238,7 +310,11 @@ def overview(
                 "severity": n.severity,
             }
         )
-    merged_ack = list(dict.fromkeys(list(enrollment.context.get("portal_acknowledged", [])) + list(acked_live)))
+    merged_ack = list(
+        dict.fromkeys(
+            list(enrollment.context.get("portal_acknowledged", [])) + list(acked_live)
+        )
+    )
 
     enrolments_out = [
         {
@@ -329,6 +405,9 @@ def portal_care(
                         "booked",
                         "consultation_completed",
                         "outcome_verified",
+                        "cancelled",
+                        "missed",
+                        "escalated",
                     ]
                 ),
             )
@@ -337,17 +416,29 @@ def portal_care(
         )
     )
     fac_ids = [r.facility_id for r in referrals if r.facility_id]
-    facilities = {
-        f.id: f.name
-        for f in ctx.db.scalars(select(CareFacility).where(CareFacility.id.in_(fac_ids))).all()
-    } if fac_ids else {}
+    facilities = (
+        {
+            f.id: f.name
+            for f in ctx.db.scalars(
+                select(CareFacility).where(CareFacility.id.in_(fac_ids))
+            ).all()
+        }
+        if fac_ids
+        else {}
+    )
     ref_ids = [r.id for r in referrals]
-    outcomes = {
-        ov.referral_id: ov
-        for ov in ctx.db.scalars(
-            select(OutcomeVerification).where(OutcomeVerification.referral_id.in_(ref_ids))
-        ).all()
-    } if ref_ids else {}
+    outcomes = (
+        {
+            ov.referral_id: ov
+            for ov in ctx.db.scalars(
+                select(OutcomeVerification).where(
+                    OutcomeVerification.referral_id.in_(ref_ids)
+                )
+            ).all()
+        }
+        if ref_ids
+        else {}
+    )
 
     # Release clinical reviews/syntheses only when a clinician has signed off
     signed_reviews = list(
@@ -356,17 +447,25 @@ def portal_care(
             .where(
                 ClinicalReview.patient_id == patient.id,
                 ClinicalReview.organization_id == org_id,
-                ClinicalReview.decision.in_(["approve_referral", "modify_plan", "no_action"]),
+                ClinicalReview.decision.in_(
+                    ["approve_referral", "modify_plan", "no_action"]
+                ),
             )
             .order_by(ClinicalReview.signed_at.desc())
             .limit(10)
         )
     )
     syn_ids = [rev.synthesis_id for rev in signed_reviews if rev.synthesis_id]
-    syntheses = {
-        s.id: s
-        for s in ctx.db.scalars(select(ClinicalSynthesis).where(ClinicalSynthesis.id.in_(syn_ids))).all()
-    } if syn_ids else {}
+    syntheses = (
+        {
+            s.id: s
+            for s in ctx.db.scalars(
+                select(ClinicalSynthesis).where(ClinicalSynthesis.id.in_(syn_ids))
+            ).all()
+        }
+        if syn_ids
+        else {}
+    )
 
     released_instructions = [
         *[
@@ -384,8 +483,16 @@ def portal_care(
                 "signed_at": rev.signed_at,
                 "decision": rev.decision,
                 "notes": rev.clinician_notes,
-                "summary_en": syntheses[rev.synthesis_id].summary_en if rev.synthesis_id in syntheses else None,
-                "summary_ar": syntheses[rev.synthesis_id].summary_ar if rev.synthesis_id in syntheses else None,
+                "summary_en": (
+                    syntheses[rev.synthesis_id].summary_en
+                    if rev.synthesis_id in syntheses
+                    else None
+                ),
+                "summary_ar": (
+                    syntheses[rev.synthesis_id].summary_ar
+                    if rev.synthesis_id in syntheses
+                    else None
+                ),
             }
             for rev in signed_reviews
         ],
@@ -414,7 +521,11 @@ def portal_care(
                 "pathway": r.pathway,
                 "status": r.status,
                 "priority": r.priority,
-                "facility_name": facilities.get(r.facility_id) if r.facility_id else r.owner_facility_label,
+                "facility_name": (
+                    facilities.get(r.facility_id)
+                    if r.facility_id
+                    else r.owner_facility_label
+                ),
                 "appointment_at": r.appointment_at,
                 "appointment_reference": r.appointment_reference,
                 "follow_up_due_at": r.follow_up_due_at,
@@ -476,10 +587,28 @@ def check_in(body: CheckInInput, ctx: AuthContext = Depends(requires(P.PORTAL_SE
             "id": str(existing.id),
             "status": "already_received",
             "emergency": existing.self_reported_crisis,
-            "escalation_instructions": _EMERGENCY_ESCALATION_INSTRUCTIONS if existing.self_reported_crisis else None,
+            "escalation_instructions": (
+                _EMERGENCY_ESCALATION_INSTRUCTIONS
+                if existing.self_reported_crisis
+                else None
+            ),
         }
     scopes, _ = evaluate_consents(ctx.db, patient, utcnow())
-    if "data_processing" not in scopes:
+    from app.agents.gate2_emergency import has_emergency_text
+
+    urgent = (
+        body.crisis
+        or body.fatigue_feeling == "dizzy_heat_illness"
+        or has_emergency_text(body.text)
+    )
+    from app.core.config import get_settings
+
+    emergency_only = (
+        "data_processing" not in scopes
+        and urgent
+        and get_settings().emergency_screen_without_consent
+    )
+    if "data_processing" not in scopes and not emergency_only:
         raise Forbidden(
             "Enable care-data processing in your privacy settings before submitting"
         )
@@ -496,8 +625,10 @@ def check_in(body: CheckInInput, ctx: AuthContext = Depends(requires(P.PORTAL_SE
     if body.hydrated is not None:
         extra["hydrated"] = body.hydrated
 
-    symptoms = ["heatstroke_confusion"] if body.fatigue_feeling == "dizzy_heat_illness" else []
-    crisis = body.crisis or body.fatigue_feeling == "dizzy_heat_illness"
+    symptoms = (
+        ["heatstroke_confusion"] if body.fatigue_feeling == "dizzy_heat_illness" else []
+    )
+    crisis = urgent
 
     row = CheckIn(
         organization_id=org_id,
@@ -505,9 +636,9 @@ def check_in(body: CheckInInput, ctx: AuthContext = Depends(requires(P.PORTAL_SE
         track=enrollment.track,
         kind="readiness" if enrollment.track == "worksafe" else "text",
         effective_at=utcnow(),
-        mood_score=body.mood,
-        stress_score=body.stress,
-        craving_score=body.craving,
+        mood_score=None if emergency_only else body.mood,
+        stress_score=None if emergency_only else body.stress,
+        craving_score=None if emergency_only else body.craving,
         text=body.text,
         symptoms=symptoms,
         self_reported_crisis=crisis,
@@ -530,12 +661,16 @@ def check_in(body: CheckInInput, ctx: AuthContext = Depends(requires(P.PORTAL_SE
             ctx_data["last_worksite"] = body.worksite
         enrollment.context = ctx_data
 
-    metrics = [
-        ("mood_score", body.mood),
-        ("stress_score", body.stress),
-        ("craving_score", body.craving),
-    ]
-    if enrollment.track == "worksafe":
+    metrics = (
+        []
+        if emergency_only
+        else [
+            ("mood_score", body.mood),
+            ("stress_score", body.stress),
+            ("craving_score", body.craving),
+        ]
+    )
+    if enrollment.track == "worksafe" and not emergency_only:
         metrics.append(("readiness_score", body.mood))
     for metric, value in metrics:
         if value is not None:
@@ -551,7 +686,11 @@ def check_in(body: CheckInInput, ctx: AuthContext = Depends(requires(P.PORTAL_SE
                     source="checkin",
                     check_in_id=row.id,
                     entered_by_id=ctx.user_id,
-                    provenance={"shift": body.shift, "worksite": body.worksite} if (body.shift or body.worksite) else {},
+                    provenance=(
+                        {"shift": body.shift, "worksite": body.worksite}
+                        if (body.shift or body.worksite)
+                        else {}
+                    ),
                 )
             )
     run = create_pipeline_run(
@@ -563,7 +702,17 @@ def check_in(body: CheckInInput, ctx: AuthContext = Depends(requires(P.PORTAL_SE
         triggered_by_id=ctx.user_id,
         idempotency_key=idem_key,
     )
-    ctx.audit("portal.checkin", "check_in", row.id, patient_id=patient.id, details={"track": enrollment.track, "shift": body.shift, "worksite": body.worksite})
+    ctx.audit(
+        "portal.checkin",
+        "check_in",
+        row.id,
+        patient_id=patient.id,
+        details={
+            "track": enrollment.track,
+            "shift": body.shift,
+            "worksite": body.worksite,
+        },
+    )
     ctx.db.commit()
     run = execute_pipeline_run(ctx.db, run.id)
     is_emg = run.status == "emergency_bypass"
@@ -571,7 +720,9 @@ def check_in(body: CheckInInput, ctx: AuthContext = Depends(requires(P.PORTAL_SE
         "id": str(row.id),
         "status": run.status,
         "emergency": is_emg,
-        "escalation_instructions": _EMERGENCY_ESCALATION_INSTRUCTIONS if is_emg else None,
+        "escalation_instructions": (
+            _EMERGENCY_ESCALATION_INSTRUCTIONS if is_emg else None
+        ),
         "shift": body.shift,
         "worksite": body.worksite,
     }
@@ -676,7 +827,9 @@ class CognitiveSessionInput(BaseModel):
 
 
 @router.post("/cognitive-sessions")
-def cognitive_session(body: CognitiveSessionInput, ctx: AuthContext = Depends(requires(P.PORTAL_SELF))):
+def cognitive_session(
+    body: CognitiveSessionInput, ctx: AuthContext = Depends(requires(P.PORTAL_SELF))
+):
     """Save assigned cognitive activity observations for the authenticated Neuro participant."""
     patient, enrollment = own_records(ctx, enrolment_id=body.enrolment_id)
     if enrollment.track != "neuro":
@@ -723,14 +876,23 @@ def cognitive_session(body: CognitiveSessionInput, ctx: AuthContext = Depends(re
         d["correct"] = d["response"] == d["expected"]
         trials.append(d)
 
-    seq_trials = [t for t in trials if t["task_type"] in {"sequence_4key", "sequence_6key", "audio_memory", "visual_memory"}]
+    seq_trials = [
+        t
+        for t in trials
+        if t["task_type"]
+        in {"sequence_4key", "sequence_6key", "audio_memory", "visual_memory"}
+    ]
     vis_trials = [t for t in trials if t["modality"] in {"visual", "audiovisual"}]
     aud_trials = [t for t in trials if t["modality"] == "auditory"]
     switch_trials = [t for t in trials if t["task_type"] == "rule_switch"]
     recall_trials = [t for t in trials if t["task_type"] == "delayed_recall"]
 
     def acc(lst: list[dict]) -> float | None:
-        return round(100.0 * sum(1 for t in lst if t["correct"]) / len(lst), 2) if lst else None
+        return (
+            round(100.0 * sum(1 for t in lst if t["correct"]) / len(lst), 2)
+            if lst
+            else None
+        )
 
     overall_acc = acc(seq_trials or trials)
     median_rt = round(statistics.median([t["reaction_time_ms"] for t in trials]), 1)
@@ -757,12 +919,17 @@ def cognitive_session(body: CognitiveSessionInput, ctx: AuthContext = Depends(re
         enrollment_id=enrollment.id,
         session_index=session_index,
         task_version=body.task_version,
-        started_at=now - timedelta(milliseconds=int(sum(t["reaction_time_ms"] for t in trials))),
+        started_at=now
+        - timedelta(milliseconds=int(sum(t["reaction_time_ms"] for t in trials))),
         completed_at=now,
         assessment_language=body.assessment_language,
         administered_by_id=ctx.user_id,
         idempotency_key=idem_key,
-        environment={**body.environment, "request_id": str(body.request_id), "task_version": body.task_version},
+        environment={
+            **body.environment,
+            "request_id": str(body.request_id),
+            "task_version": body.task_version,
+        },
         raw_trials=trials,
         derived_metrics=derived,
         status="practice" if body.is_practice else "completed",
@@ -794,7 +961,10 @@ def cognitive_session(body: CognitiveSessionInput, ctx: AuthContext = Depends(re
                         source=ObservationSource.ASSESSMENT.value,
                         cognitive_assessment_id=ca.id,
                         entered_by_id=ctx.user_id,
-                        provenance={"task_version": body.task_version, "enrolment_id": str(enrollment.id)},
+                        provenance={
+                            "task_version": body.task_version,
+                            "enrolment_id": str(enrollment.id),
+                        },
                     )
                 )
                 observations_saved += 1
@@ -817,7 +987,11 @@ def cognitive_session(body: CognitiveSessionInput, ctx: AuthContext = Depends(re
         "cognitive_assessment",
         ca.id,
         patient_id=patient.id,
-        details={"task_version": body.task_version, "enrolment_id": str(enrollment.id), "observations_saved": observations_saved},
+        details={
+            "task_version": body.task_version,
+            "enrolment_id": str(enrollment.id),
+            "observations_saved": observations_saved,
+        },
     )
     ctx.db.commit()
     if run is not None:
@@ -871,7 +1045,11 @@ def consent(body: PermissionInput, ctx: AuthContext = Depends(requires(P.PORTAL_
         "patient",
         patient.id,
         patient_id=patient.id,
-        details={"scope": body.scope, "granted": body.granted, "policy_version": body.policy_version},
+        details={
+            "scope": body.scope,
+            "granted": body.granted,
+            "policy_version": body.policy_version,
+        },
     )
     ctx.db.commit()
     return {"saved": True}

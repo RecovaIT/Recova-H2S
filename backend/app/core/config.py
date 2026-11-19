@@ -17,7 +17,9 @@ _DEV_SECRET = "dev-insecure-secret-change-me-0000000000000000"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     environment: Literal["development", "test", "production"] = "development"
     app_name: str = "Recova Anticipatory Health Platform"
@@ -37,6 +39,7 @@ class Settings(BaseSettings):
     cookie_secure: bool = False
     cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     password_reset_ttl_minutes: int = 30
+    bootstrap_setup_token: str = ""
     cors_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:3000",
@@ -57,7 +60,9 @@ class Settings(BaseSettings):
     scheduler_interval_seconds: int = 60
 
     # LLM provider abstraction (Agent 5)
-    llm_provider: Literal["none", "openai", "azure_openai", "gemini", "anthropic"] = "none"
+    llm_provider: Literal["none", "openai", "azure_openai", "gemini", "anthropic"] = (
+        "none"
+    )
     llm_api_key: str = ""
     llm_model: str = ""
     llm_base_url: str = ""  # optional override (e.g. Azure endpoint)
@@ -95,9 +100,9 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             val = v.strip()
             if val.startswith("postgres://"):
-                return "postgresql+psycopg://" + val[len("postgres://"):]
+                return "postgresql+psycopg://" + val[len("postgres://") :]
             if val.startswith("postgresql://"):
-                return "postgresql+psycopg://" + val[len("postgresql://"):]
+                return "postgresql+psycopg://" + val[len("postgresql://") :]
             return val
         return v
 
@@ -116,8 +121,31 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _production_guards(self) -> "Settings":
         if self.environment == "production":
+            if self.bootstrap_setup_token and (
+                len(self.bootstrap_setup_token) < 32
+                or self.bootstrap_setup_token.startswith("__GENERATE_")
+            ):
+                raise ValueError(
+                    "BOOTSTRAP_SETUP_TOKEN must be a private random secret of at least 32 characters, or empty to disable initialization"
+                )
+            from urllib.parse import urlsplit
+
+            origin = urlsplit(self.frontend_base_url)
+            if (
+                origin.scheme != "https"
+                or not origin.hostname
+                or origin.username
+                or origin.password
+                or origin.query
+                or origin.fragment
+            ):
+                raise ValueError(
+                    "FRONTEND_BASE_URL must be the trusted public HTTPS URL in production"
+                )
             if self.secret_key == _DEV_SECRET or len(self.secret_key) < 32:
-                raise ValueError("SECRET_KEY must be set to a strong value in production")
+                raise ValueError(
+                    "SECRET_KEY must be set to a strong value in production"
+                )
             if not self.field_encryption_key:
                 raise ValueError("FIELD_ENCRYPTION_KEY must be set in production")
             if not self.cookie_secure:
@@ -138,7 +166,11 @@ class Settings(BaseSettings):
 
     @property
     def twilio_configured(self) -> bool:
-        return bool(self.twilio_account_sid and self.twilio_auth_token and (self.twilio_from_number or self.twilio_whatsapp_from))
+        return bool(
+            self.twilio_account_sid
+            and self.twilio_auth_token
+            and (self.twilio_from_number or self.twilio_whatsapp_from)
+        )
 
 
 @lru_cache

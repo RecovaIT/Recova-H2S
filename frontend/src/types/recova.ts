@@ -155,6 +155,7 @@ export interface Membership {
 export interface User {
   id: string;
   email: string;
+  email_verified_at?: string | null;
   full_name: string;
   is_active: boolean;
   is_platform_admin: boolean;

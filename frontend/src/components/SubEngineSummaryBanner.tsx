@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Activity, AlertOctagon, CheckCircle2, ShieldAlert, Users } from "lucide-react";
 import { opsService } from "@/services/ops";
+import { useAuth } from "@/hooks/useAuth";
 import type { OverviewReport, Track } from "@/types/recova";
 import { cn } from "@/lib/utils";
 
@@ -14,10 +15,13 @@ const TRACK_LABELS: Record<Track, string> = {
 };
 
 export function SubEngineSummaryBanner({ track }: { track: Track }) {
+  const {session}=useAuth();
+  const aggregateOnly=session?.role === "supervisor";
   const [overview, setOverview] = useState<OverviewReport | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if(aggregateOnly)return;
     let active = true;
     opsService
       .getOverview()
@@ -33,7 +37,9 @@ export function SubEngineSummaryBanner({ track }: { track: Track }) {
     return () => {
       active = false;
     };
-  }, [track]);
+  }, [track,aggregateOnly]);
+
+  if(aggregateOnly)return <p className="text-sm text-slate-600">Your department heatmap below protects individual privacy. Clinical actions are managed by the occupational health team.</p>;
 
   const dist = overview?.track_risk_distribution?.[track] || {};
   const green = dist.GREEN || 0;

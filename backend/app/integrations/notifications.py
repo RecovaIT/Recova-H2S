@@ -29,6 +29,7 @@ def send_email_direct(
     to_address: str,
     subject: str,
     body: str,
+    html_body: str | None = None,
     smtp_cfg: dict | None = None,
     settings: Settings | None = None,
 ) -> dict:
@@ -38,27 +39,80 @@ def send_email_direct(
     username = (smtp_cfg or {}).get("username") or s.smtp_username
     password = (smtp_cfg or {}).get("password") or s.smtp_password
     from_addr = (smtp_cfg or {}).get("from_address") or s.smtp_from
-    use_tls = bool((smtp_cfg or {}).get("use_tls") if smtp_cfg and "use_tls" in smtp_cfg else s.smtp_use_tls)
+    use_tls = bool(
+        (smtp_cfg or {}).get("use_tls")
+        if smtp_cfg and "use_tls" in smtp_cfg
+        else s.smtp_use_tls
+    )
 
     if not host or not from_addr:
-        return {"status": NotificationStatus.NOT_CONFIGURED.value, "provider": "smtp", "error": "SMTP host/from not configured"}
+        return {
+            "status": NotificationStatus.NOT_CONFIGURED.value,
+            "provider": "smtp",
+            "error": "SMTP host/from not configured",
+        }
 
     msg = EmailMessage()
     msg["From"] = from_addr
     msg["To"] = to_address
-    msg["Subject"] = subject
+    msg["Subject"] = " ".join(subject.split())[:200]
     msg.set_content(body)
+    if html_body:
+        msg.add_alternative(html_body, subtype="html")
     try:
-        with smtplib.SMTP(host, port, timeout=15) as server:
-            if use_tls:
+        smtp_class = smtplib.SMTP_SSL if port == 465 else smtplib.SMTP
+        with smtp_class(host, port, timeout=15) as server:
+            if use_tls and port != 465:
                 server.starttls()
             if username:
                 server.login(username, password)
             server.send_message(msg)
         # SMTP relays accept for forwarding; mark `sent`, not `delivered` until DSN/webhook.
-        return {"status": NotificationStatus.SENT.value, "provider": "smtp", "provider_message_id": None}
+        return {
+            "status": NotificationStatus.SENT.value,
+            "provider": "smtp",
+            "provider_message_id": None,
+        }
     except Exception as exc:  # noqa: BLE001
-        return {"status": NotificationStatus.FAILED.value, "provider": "smtp", "error": f"{type(exc).__name__}: {exc}"}
+        return {
+            "status": NotificationStatus.FAILED.value,
+            "provider": "smtp",
+            "error": f"SMTP submission failed ({type(exc).__name__}). Check server connection and sender settings.",
+        }
+
+
+def test_smtp_connection(smtp_cfg: dict | None = None) -> dict:
+    s = get_settings()
+    cfg = smtp_cfg or {}
+    host = cfg.get("host") or s.smtp_host
+    port = int(cfg.get("port") or s.smtp_port)
+    if not host or not (cfg.get("from_address") or s.smtp_from):
+        return {
+            "status": "not_configured",
+            "connected": False,
+            "message": "SMTP host and sender are required",
+        }
+    try:
+        cls = smtplib.SMTP_SSL if port == 465 else smtplib.SMTP
+        with cls(host, port, timeout=10) as server:
+            server.ehlo()
+            if port != 465 and cfg.get("use_tls", s.smtp_use_tls):
+                server.starttls()
+                server.ehlo()
+            username = cfg.get("username") or s.smtp_username
+            if username:
+                server.login(username, cfg.get("password") or s.smtp_password)
+        return {
+            "status": "connected",
+            "connected": True,
+            "message": "SMTP connection verified. Inbox delivery still requires a controlled send.",
+        }
+    except Exception:
+        return {
+            "status": "failed",
+            "connected": False,
+            "message": "SMTP connection or authentication failed. Check host, port, TLS and credentials.",
+        }
 
 
 def send_twilio_direct(
@@ -78,10 +132,22 @@ def send_twilio_direct(
         else ((twilio_cfg or {}).get("from_number") or s.twilio_from_number)
     )
     if not sid or not token or not from_num:
-        return {"status": NotificationStatus.NOT_CONFIGURED.value, "provider": "twilio", "error": "Twilio credentials or sender number not configured"}
+        return {
+            "status": NotificationStatus.NOT_CONFIGURED.value,
+            "provider": "twilio",
+            "error": "Twilio credentials or sender number not configured",
+        }
 
-    to_fmt = f"whatsapp:{to_number}" if whatsapp and not to_number.startswith("whatsapp:") else to_number
-    from_fmt = f"whatsapp:{from_num}" if whatsapp and not from_num.startswith("whatsapp:") else from_num
+    to_fmt = (
+        f"whatsapp:{to_number}"
+        if whatsapp and not to_number.startswith("whatsapp:")
+        else to_number
+    )
+    from_fmt = (
+        f"whatsapp:{from_num}"
+        if whatsapp and not from_num.startswith("whatsapp:")
+        else from_num
+    )
     try:
         r = httpx.post(
             f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
@@ -97,7 +163,11 @@ def send_twilio_direct(
             "provider_message_id": data.get("sid"),
         }
     except Exception as exc:  # noqa: BLE001
-        return {"status": NotificationStatus.FAILED.value, "provider": "twilio", "error": f"{type(exc).__name__}: {exc}"}
+        return {
+            "status": NotificationStatus.FAILED.value,
+            "provider": "twilio",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 def dispatch_notification(
@@ -119,7 +189,9 @@ def dispatch_notification(
     if idempotency_key:
         from sqlalchemy import select
 
-        existing = db.scalar(select(Notification).where(Notification.idempotency_key == idempotency_key))
+        existing = db.scalar(
+            select(Notification).where(Notification.idempotency_key == idempotency_key)
+        )
         if existing is not None:
             return existing
 
@@ -170,18 +242,22 @@ def dispatch_notification(
             notif.status = NotificationStatus.FAILED.value
             notif.last_error = "No email address on file for recipient"
         else:
-            res = send_email_direct(
-                to_address=addr,
+            from app.services.messaging import queue_email
+
+            delivery = queue_email(
+                db,
+                to=addr,
                 subject=subject,
                 body=body,
-                smtp_cfg=(org_integrations or {}).get("smtp"),
+                category="notification",
+                organization_id=organization_id,
+                user_id=recipient_user.id if recipient_user else None,
+                notification_id=notif.id,
+                key=f"notification:{notif.id}",
             )
-            notif.status = res["status"]
-            notif.provider = res.get("provider")
-            notif.provider_message_id = res.get("provider_message_id")
-            notif.last_error = res.get("error")
-            if res["status"] == NotificationStatus.SENT.value:
-                notif.sent_at = now
+            notif.status = delivery.status
+            notif.provider = "smtp_outbox"
+            notif.last_error = delivery.last_error
     elif ch in {NotificationChannel.SMS, NotificationChannel.WHATSAPP}:
         if not addr:
             notif.status = NotificationStatus.FAILED.value

@@ -15,7 +15,7 @@ from app.models.base import utcnow
 from app.benchmarks.runner import create_benchmark_run, execute_benchmark_run
 from app.benchmarks.suites import BENCHMARK_SUITE, SUITE_NAME, SUITE_VERSION
 from app.core.errors import Forbidden, NotFound
-from app.core.permissions import P
+from app.core.permissions import P, Role
 from app.core.security import decrypt_str
 from app.integrations.fhir import build_patient_fhir_bundle, validate_fhir_bundle
 from app.integrations.malaffi import push_fhir_bundle
@@ -267,6 +267,8 @@ def test_integration(name: str, ctx: AuthContext = Depends(requires(P.SETTINGS_M
 # --- Reports / Dashboard Overview (100% real DB aggregates, zero mock numbers) ---
 @reports_router.get("/overview")
 def organization_overview(ctx: AuthContext = Depends(requires(P.ORG_READ))):
+    if ctx.role == Role.SUPERVISOR:
+        raise Forbidden('Supervisor reports are available through the privacy-protected WorkSafe department heatmap.')
     org_id = ctx.org_id
     real_patient_ids = select(Patient.id).where(Patient.organization_id == org_id, Patient.is_synthetic.is_(False))
     active_patients = ctx.db.scalar(

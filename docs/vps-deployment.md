@@ -114,7 +114,9 @@ curl -fsS https://h2s.recovahq.com/api/v1/auth/status
 # Expected: {"needs_bootstrap":true}  (until initial platform/organisation setup)
 ```
 
-Then open `https://h2s.recovahq.com` in your browser to complete `/bootstrap` (or optionally load the judge demo dataset inside the container):
+Before initializing production, set a private random `BOOTSTRAP_SETUP_TOKEN` of at least 32 characters in `.env.vps` and recreate the backend. Generate it with `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`. Keep it private. The setup script generates it for a new environment file; existing files need this setting added manually. Enter it on `/bootstrap` when creating the intended platform operator. Clear the token and restart the backend after successful initialization. Public organization registration stays blocked until this step finishes.
+
+Synthetic judge fixtures bypass real invitation delivery and are not proof of onboarding or production readiness. Only optionally load them in an explicitly designated demonstration environment:
 ```bash
 # Optional: seed judge demo data (only on a fresh demo environment)
 docker compose -f docker-compose.vps.yml --env-file .env.vps exec backend python scripts/seed_judge_demo.py

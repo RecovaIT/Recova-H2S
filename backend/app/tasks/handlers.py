@@ -62,8 +62,16 @@ def handle_benchmark_run(db: Session, job: Job) -> dict:
 @register("referrals.sla_monitor")
 def handle_sla_monitor(db: Session, job: Job) -> dict:
     org_id = uuid.UUID(job.payload["organization_id"]) if job.payload.get("organization_id") else None
+    from app.services.care import send_appointment_reminders
+    send_appointment_reminders(db,org_id)
     return evaluate_referral_slas(db, organization_id=org_id)
 
 
 # Run SLA & missed-appointment monitoring every 5 minutes in background worker
+@register("email.deliver")
+def handle_email(db: Session, job: Job) -> dict:
+    from app.services.messaging import deliver_email
+    return deliver_email(db, uuid.UUID(job.payload["email_id"]))
+
+
 periodic("referrals.sla_monitor", every_seconds=300)

@@ -70,6 +70,7 @@ class MembershipOut(ORMModel):
 class UserOut(ORMModel):
     id: uuid.UUID
     email: EmailStr
+    email_verified_at: datetime | None = None
     full_name: str
     is_active: bool
     is_platform_admin: bool
@@ -84,6 +85,7 @@ class UserWithMembershipsOut(UserOut):
 
 
 class BootstrapRequest(BaseModel):
+    bootstrap_setup_token: str | None = Field(default=None,max_length=256,repr=False,exclude=True)
     organization_name: str = Field(min_length=2, max_length=200)
     organization_slug: str = Field(min_length=2, max_length=80, pattern=r"^[a-z0-9-]+$")
     org_type: Literal["clinic", "rehab_center", "public_health", "employer", "hospital"] = "hospital"
@@ -177,7 +179,7 @@ class UserCreateRequest(BaseModel):
     preferred_language: Literal["en", "ar"] = "en"
     license_number: str | None = Field(default=None, max_length=80)
     department_ids: list[uuid.UUID] = Field(default_factory=list)
-    send_activation_email: bool = False
+    send_activation_email: bool = True
 
     @field_validator("role")
     @classmethod

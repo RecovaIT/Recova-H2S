@@ -73,13 +73,14 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   FIELD_ENCRYPTION_KEY="$(python3 -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')"
 
   python3 - "${ENV_FILE}" "${DOMAIN}" "${POSTGRES_PASSWORD}" "${SECRET_KEY}" "${FIELD_ENCRYPTION_KEY}" <<'PY'
-import pathlib, sys
+import pathlib, sys, secrets
 
 env_path = pathlib.Path(sys.argv[1])
 domain, pg_pass, secret_key, fernet_key = sys.argv[2:6]
 text = env_path.read_text(encoding="utf-8")
 text = text.replace("__GENERATE_POSTGRES_PASSWORD__", pg_pass)
 text = text.replace("__GENERATE_SECRET_KEY__", secret_key)
+text = text.replace("__GENERATE_BOOTSTRAP_SETUP_TOKEN__", secrets.token_urlsafe(48))
 text = text.replace("__GENERATE_FIELD_ENCRYPTION_KEY__", fernet_key)
 text = text.replace("h2s.recovahq.com", domain)
 env_path.write_text(text, encoding="utf-8")

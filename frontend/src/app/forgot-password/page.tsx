@@ -10,7 +10,7 @@ import { Input, Label } from "@/components/ui/input";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<{ message: string; token?: string } | null>(null);
+  const [status, setStatus] = useState<{ message: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -20,7 +20,7 @@ export default function ForgotPasswordPage() {
     setBusy(true);
     try {
       const res = await authService.requestPasswordReset(email.trim());
-      setStatus({ message: res.message, token: res.reset_token });
+      setStatus({ message: res.message });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Request failed");
     } finally {
@@ -34,7 +34,7 @@ export default function ForgotPasswordPage() {
         <CardHeader>
           <CardTitle>Password Recovery</CardTitle>
           <CardDescription>
-            Enter your account email to request a time-limited password reset token.
+            Enter your account email. If an account exists, we will send a private password setup link. Contact your facility if it does not arrive.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -43,14 +43,7 @@ export default function ForgotPasswordPage() {
             {status && (
               <Alert variant="success" title="Reset Initiated">
                 <p>{status.message}</p>
-                {status.token && (
-                  <p className="mt-2 font-mono text-[11px]">
-                    Dev Token: <strong>{status.token}</strong>{" "}
-                    <Link href={`/reset-password?token=${encodeURIComponent(status.token)}`} className="underline">
-                      Reset now →
-                    </Link>
-                  </p>
-                )}
+
               </Alert>
             )}
             <div className="space-y-1">

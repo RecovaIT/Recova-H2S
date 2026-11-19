@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AccountSecurityPanel } from "@/components/AccountSecurityPanel";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
@@ -982,7 +983,7 @@ export default function ParticipantPortal() {
               <Button
                 type="submit"
                 className="w-full"
-                disabled={busy || !processing || submitted}
+                disabled={busy || (!processing && !crisis) || submitted}
               >
                 {submitted
                   ? "Check-in received"
@@ -1199,6 +1200,7 @@ export default function ParticipantPortal() {
         )}
         {tab === "profile" && (
           <>
+            <AccountSecurityPanel />
             <section className="patient-panel">
               <span className="patient-avatar mb-4">
                 {data.name.slice(0, 1)}

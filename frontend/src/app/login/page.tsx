@@ -25,10 +25,14 @@ export default function LoginPage() {
     if (needsBootstrap) {
       router.replace("/bootstrap");
     } else if (session) {
+      const next = new URLSearchParams(window.location.search).get("next");
+      if (next?.startsWith("/accept-invitation?")) { router.replace(next); return; }
       if (session.role === "patient") {
         router.replace("/portal");
       } else if (session.role === "authority_user") {
         router.replace("/authority");
+      } else if (session.role === "supervisor") {
+        router.replace("/worksafe");
       } else {
         router.replace("/dashboard");
       }
@@ -41,10 +45,14 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const result = await login({ email: email.trim(), password });
+      const next = new URLSearchParams(window.location.search).get("next");
+      if (next?.startsWith("/accept-invitation?")) { router.replace(next); return; }
       if (result.role === "patient") {
         router.replace("/portal");
       } else if (result.role === "authority_user") {
         router.replace("/authority");
+      } else if (result.role === "supervisor") {
+        router.replace("/worksafe");
       } else {
         router.replace("/dashboard");
       }

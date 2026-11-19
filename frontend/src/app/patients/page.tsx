@@ -69,7 +69,7 @@ export default function PatientsPage() {
     <AuthGuard requiredPermission="patients:read">
       <AppShell
         title="Patients & Workforce Participants"
-        subtitle={`Organisational directory (${total} active records). Strict multi-tenant isolation enforced.`}
+        subtitle={`Organisational directory (${total} active records). Synthetic test accounts are excluded.`}
         actions={
           hasPermission("patients:write") ? (
             <Button size="sm" onClick={() => setCreateOpen(true)}>

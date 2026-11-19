@@ -195,11 +195,10 @@ export default function PatientDetailPage() {
     setBusy(true);
     try {
       const res = await patientsService.issuePortalInvitation(patientId, email.trim());
-      const invitePath = `/accept-invitation?token=${encodeURIComponent(res.invitation_token)}`;
       pushToast(
-        `Portal invitation issued for ${res.organization_name || "facility"} (72h expiry)`,
-        "success",
-        `Link: ${invitePath}`
+        `Portal invitation saved for ${res.organization_name || "facility"} (72h expiry)`,
+        "info",
+        res.delivery_status === "not_configured" ? "Configure the server SMTP sender and retry from account email deliveries." : `Email status: ${res.delivery_status}. Track delivery in Administration.`
       );
     } catch (err) {
       pushToast("Could not issue invitation", "error", err instanceof Error ? err.message : undefined);

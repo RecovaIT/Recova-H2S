@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useReducedMotion } from "framer-motion";
 import {
   Activity,
@@ -118,6 +119,7 @@ const RISK_SERIES = [
 ];
 
 export default function DashboardPage() {
+  const router=useRouter();
   const { session, hasPermission, hasTrack, refreshSession } = useAuth();
   const reduceMotion = useReducedMotion();
   const [overview, setOverview] = useState<OverviewReport | null>(null);
@@ -133,6 +135,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!session) return;
+    if(session.role === "supervisor") { router.replace("/worksafe"); return; }
     let active = true;
     Promise.all([
       opsService.getOverview(),
@@ -161,7 +164,7 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-  }, [session, hasPermission]);
+  }, [session, hasPermission, router]);
 
   const primaryProgramme = session?.active_organization?.primary_programme;
   const tracks = TRACKS.filter((track) => {

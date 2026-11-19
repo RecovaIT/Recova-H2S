@@ -99,7 +99,9 @@ export const patientsService = {
     primary_programme?: string | null;
     recipient_email: string;
     expires_at: string;
-    invitation_token: string;
+    invitation_token: string | null;
+    delivery_status: string;
+    invitation_url?: string | null;
   }> {
     return api.post(`/patients/${patientId}/portal-invitations`, { recipient_email: recipientEmail });
   },

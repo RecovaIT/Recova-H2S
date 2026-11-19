@@ -5,14 +5,20 @@ from __future__ import annotations
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, resolve_permissions
 from app.core import audit
 from app.core.config import get_settings
-from app.core.errors import Conflict, Forbidden, NotFound, Unauthorized, ValidationFailed
+from app.core.errors import (
+    Conflict,
+    Forbidden,
+    NotFound,
+    Unauthorized,
+    ValidationFailed,
+)
 from app.core.permissions import P, Role
 from app.core.rate_limit import limiter
 from app.core.security import (
@@ -33,7 +39,13 @@ from app.models.identity import (
     User,
     UserSession,
 )
-from app.schemas.identity import BootstrapRequest, MembershipOut, OrganizationOut, SessionResponse, UserOut
+from app.schemas.identity import (
+    BootstrapRequest,
+    MembershipOut,
+    OrganizationOut,
+    SessionResponse,
+    UserOut,
+)
 
 
 def _participant_enrolments_for_user(db: Session, user: User) -> list[dict]:
@@ -45,7 +57,9 @@ def _participant_enrolments_for_user(db: Session, user: User) -> list[dict]:
     ).all()
     patient_ids = [lnk.patient_id for lnk in links]
     fallback_patients = db.scalars(
-        select(Patient).where(Patient.portal_user_id == user.id, Patient.is_active.is_(True))
+        select(Patient).where(
+            Patient.portal_user_id == user.id, Patient.is_active.is_(True)
+        )
     ).all()
     for p in fallback_patients:
         if p.id not in patient_ids:
@@ -59,37 +73,76 @@ def _participant_enrolments_for_user(db: Session, user: User) -> list[dict]:
         )
     ).all()
     org_ids = list({e.organization_id for e in enrollments})
-    orgs = {o.id: o for o in db.scalars(select(Organization).where(Organization.id.in_(org_ids))).all()} if org_ids else {}
+    active_memberships = set(
+        db.scalars(
+            select(Membership.organization_id).where(
+                Membership.user_id == user.id, Membership.is_active.is_(True)
+            )
+        )
+    )
+    orgs = (
+        {
+            o.id: o
+            for o in db.scalars(
+                select(Organization).where(Organization.id.in_(org_ids))
+            ).all()
+        }
+        if org_ids
+        else {}
+    )
     return [
         {
             "enrolment_id": str(e.id),
             "patient_id": str(e.patient_id),
             "organization_id": str(e.organization_id),
-            "organization_name": orgs[e.organization_id].name if e.organization_id in orgs else None,
+            "organization_name": (
+                orgs[e.organization_id].name if e.organization_id in orgs else None
+            ),
             "programme": e.track,
             "track": e.track,
             "status": e.status,
         }
         for e in enrollments
-        if e.organization_id in orgs and orgs[e.organization_id].is_active
+        if e.organization_id in active_memberships
+        and e.organization_id in orgs
+        and orgs[e.organization_id].is_active
     ]
 
 
-def _session_payload(db: Session, user: User, sess: UserSession, raw_csrf: str | None = None) -> SessionResponse:
+def _session_payload(
+    db: Session, user: User, sess: UserSession, raw_csrf: str | None = None
+) -> SessionResponse:
     memberships = db.scalars(
-        select(Membership).where(Membership.user_id == user.id, Membership.is_active.is_(True))
+        select(Membership).where(
+            Membership.user_id == user.id, Membership.is_active.is_(True)
+        )
     ).all()
     org_ids = [m.organization_id for m in memberships]
-    orgs = {o.id: o for o in db.scalars(select(Organization).where(Organization.id.in_(org_ids))).all()} if org_ids else {}
+    orgs = (
+        {
+            o.id: o
+            for o in db.scalars(
+                select(Organization).where(Organization.id.in_(org_ids))
+            ).all()
+        }
+        if org_ids
+        else {}
+    )
 
     active_org: Organization | None = None
     active_role: Role | None = None
     if sess.active_organization_id:
         active_org = db.get(Organization, sess.active_organization_id)
-        if active_org is not None and not active_org.is_active and not user.is_platform_admin:
+        if (
+            active_org is not None
+            and not active_org.is_active
+            and not user.is_platform_admin
+        ):
             active_org = None
         if active_org is not None:
-            m = next((x for x in memberships if x.organization_id == active_org.id), None)
+            m = next(
+                (x for x in memberships if x.organization_id == active_org.id), None
+            )
             if m:
                 active_role = Role(m.role)
             elif user.is_platform_admin:
@@ -99,31 +152,64 @@ def _session_payload(db: Session, user: User, sess: UserSession, raw_csrf: str |
     elif user.is_platform_admin:
         active_role = Role.PLATFORM_ADMIN
 
-    perms, tracks = resolve_permissions(db, active_org, active_role, user.is_platform_admin)
-    participant_enrolments = _participant_enrolments_for_user(db, user)
-    active_enrolment = (
-        next((e for e in participant_enrolments if active_org and e["organization_id"] == str(active_org.id)), None)
-        or (participant_enrolments[0] if participant_enrolments else None)
+    perms, tracks = resolve_permissions(
+        db, active_org, active_role, user.is_platform_admin
     )
+    participant_enrolments = _participant_enrolments_for_user(db, user)
+    if participant_enrolments:
+        perms.add(P.PORTAL_SELF)
+    active_enrolment = next(
+        (
+            e
+            for e in participant_enrolments
+            if active_org and e["organization_id"] == str(active_org.id)
+        ),
+        None,
+    ) or (participant_enrolments[0] if participant_enrolments else None)
     has_auth_scope = bool(
         db.scalar(
-            select(AuthorityScope.id).where(AuthorityScope.user_id == user.id, AuthorityScope.is_active.is_(True))
+            select(AuthorityScope.id).where(
+                AuthorityScope.user_id == user.id, AuthorityScope.is_active.is_(True)
+            )
         )
     )
     org_settings = (active_org.settings or {}) if active_org else {}
     primary_prog = (
-        active_org.primary_programme
-        or (active_org.enabled_tracks[0] if active_org and active_org.enabled_tracks else None)
-    ) if active_org else None
+        (
+            active_org.primary_programme
+            or (
+                active_org.enabled_tracks[0]
+                if active_org and active_org.enabled_tracks
+                else None
+            )
+        )
+        if active_org
+        else None
+    )
     prog_status = active_org.programme_configuration_status if active_org else None
     capability_flags = {
-        "shared_population_health": bool(org_settings.get("shared_population_health_provisioned", True)) if active_org else False,
-        "external_synthesis_opt_in": bool((org_settings.get("participation_consent") or {}).get("external_synthesis_opt_in", False)),
-        "authority_publish": bool(user.is_platform_admin or (P.AUTHORITY_PUBLISH in perms and has_auth_scope)),
-        "authority_reports": bool(user.is_platform_admin or (P.AUTHORITY_REPORTS in perms and has_auth_scope)),
+        "shared_population_health": (
+            bool(org_settings.get("shared_population_health_provisioned", True))
+            if active_org
+            else False
+        ),
+        "external_synthesis_opt_in": bool(
+            (org_settings.get("participation_consent") or {}).get(
+                "external_synthesis_opt_in", False
+            )
+        ),
+        "authority_publish": bool(
+            user.is_platform_admin or (P.AUTHORITY_PUBLISH in perms and has_auth_scope)
+        ),
+        "authority_reports": bool(
+            user.is_platform_admin or (P.AUTHORITY_REPORTS in perms and has_auth_scope)
+        ),
         "requires_programme_selection": prog_status == "pending_selection",
         "participant_portal": bool(participant_enrolments),
-        "multi_capacity": bool(participant_enrolments and any(m.role != Role.PATIENT.value for m in memberships)),
+        "multi_capacity": bool(
+            participant_enrolments
+            and any(m.role != Role.PATIENT.value for m in memberships)
+        ),
     }
 
     m_out = [
@@ -131,8 +217,12 @@ def _session_payload(db: Session, user: User, sess: UserSession, raw_csrf: str |
             id=m.id,
             user_id=m.user_id,
             organization_id=m.organization_id,
-            organization_name=orgs[m.organization_id].name if m.organization_id in orgs else None,
-            organization_slug=orgs[m.organization_id].slug if m.organization_id in orgs else None,
+            organization_name=(
+                orgs[m.organization_id].name if m.organization_id in orgs else None
+            ),
+            organization_slug=(
+                orgs[m.organization_id].slug if m.organization_id in orgs else None
+            ),
             role=m.role,
             is_active=m.is_active,
             department_ids=list(m.department_ids or []),
@@ -142,7 +232,9 @@ def _session_payload(db: Session, user: User, sess: UserSession, raw_csrf: str |
     ]
     return SessionResponse(
         user=UserOut.model_validate(user),
-        active_organization=OrganizationOut.model_validate(active_org) if active_org else None,
+        active_organization=(
+            OrganizationOut.model_validate(active_org) if active_org else None
+        ),
         role=active_role.value if active_role else None,
         primary_programme=primary_prog,
         programme_configuration_status=prog_status,
@@ -178,36 +270,54 @@ def _create_org_and_admin_session(
         distinct_tracks = list(dict.fromkeys(t.value for t in req.enabled_tracks))
         if req.primary_programme is not None:
             if any(t != req.primary_programme.value for t in distinct_tracks):
-                raise ValidationFailed("Select exactly one primary programme during organisation registration.")
+                raise ValidationFailed(
+                    "Select exactly one primary programme during organisation registration."
+                )
             resolved_tracks = [req.primary_programme.value]
             primary_prog = req.primary_programme.value
         elif len(distinct_tracks) == 1:
             resolved_tracks = distinct_tracks
             primary_prog = distinct_tracks[0]
         else:
-            raise ValidationFailed("Select exactly one primary programme during organisation registration.")
+            raise ValidationFailed(
+                "Select exactly one primary programme during organisation registration."
+            )
     else:
         if not req.enabled_tracks:
             raise ValidationFailed("Select at least one application track")
         resolved_tracks = list(dict.fromkeys(t.value for t in req.enabled_tracks))
-        primary_prog = req.primary_programme.value if req.primary_programme else resolved_tracks[0]
+        primary_prog = (
+            req.primary_programme.value if req.primary_programme else resolved_tracks[0]
+        )
 
     slug = req.organization_slug.strip().lower()
     email = req.admin_email.strip().lower()
     idem_key = req.idempotency_key.strip() if req.idempotency_key else None
 
-    if idem_key and db.scalar(select(Organization).where(Organization.idempotency_key == idem_key)) is not None:
+    if (
+        idem_key
+        and db.scalar(
+            select(Organization).where(Organization.idempotency_key == idem_key)
+        )
+        is not None
+    ):
         raise Conflict("Duplicate organisation registration submission rejected")
     if db.scalar(select(Organization).where(Organization.slug == slug)) is not None:
         raise Conflict(f"Organisation slug '{slug}' already exists")
     if db.scalar(select(User).where(User.email == email)) is not None:
-        raise Conflict(f"An account with email '{email}' already exists. Sign in or use another admin email.")
+        raise Conflict(
+            f"An account with email '{email}' already exists. Sign in or use another admin email."
+        )
 
     now = utcnow()
     participation_consent = dict(req.participation_consent or {})
     policy_version = str(participation_consent.get("policy_version") or "v1.0")
-    ext_synthesis_opt_in = bool(participation_consent.get("external_synthesis_opt_in", False))
-    accepted_public_health = bool(participation_consent.get("accepted_public_health_coordination", True))
+    ext_synthesis_opt_in = bool(
+        participation_consent.get("external_synthesis_opt_in", False)
+    )
+    accepted_public_health = bool(
+        participation_consent.get("accepted_public_health_coordination", True)
+    )
 
     org_settings = {
         "shared_population_health_provisioned": True,
@@ -218,7 +328,9 @@ def _create_org_and_admin_session(
             "policy_version": policy_version,
             "accepted_public_health_coordination": accepted_public_health,
             "external_synthesis_opt_in": ext_synthesis_opt_in,
-            "external_channels": list(participation_consent.get("external_channels") or []),
+            "external_channels": list(
+                participation_consent.get("external_channels") or []
+            ),
             "recorded_by_email": email,
             "recorded_at": now.isoformat(),
         },
@@ -262,7 +374,9 @@ def _create_org_and_admin_session(
     )
     db.add(membership)
 
-    raw_session, raw_csrf, sess = _create_session(db, user, org.id, ip_address=ip_address, user_agent=user_agent)
+    raw_session, raw_csrf, sess = _create_session(
+        db, user, org.id, ip_address=ip_address, user_agent=user_agent
+    )
     audit.record(
         db,
         action=audit_action,
@@ -281,6 +395,9 @@ def _create_org_and_admin_session(
         },
         ip_address=ip_address,
     )
+    from app.services.messaging import account_link
+
+    account_link(db, user, "verify_email", organization_id=org.id)
     try:
         db.commit()
     except IntegrityError as exc:
@@ -297,6 +414,18 @@ def bootstrap_platform(
     user_agent: str | None = None,
 ) -> tuple[SessionResponse, str, str]:
     """One-time platform initialisation when zero users exist."""
+    settings = get_settings()
+    limiter.check(f'bootstrap:{ip_address or "unknown"}', 5, 60)
+    if settings.environment == "production":
+        import hmac
+
+        if len(settings.bootstrap_setup_token) < 32 or not hmac.compare_digest(
+            settings.bootstrap_setup_token, req.bootstrap_setup_token or ""
+        ):
+            raise Forbidden(
+                "Production initialization requires the operator setup secret. Contact the deployment owner."
+            )
+    db.execute(text("SELECT pg_advisory_xact_lock(738490112)"))
     if not needs_bootstrap(db):
         raise Conflict("Platform has already been initialised")
     return _create_org_and_admin_session(
@@ -318,7 +447,14 @@ def register_organization(
 ) -> tuple[SessionResponse, str, str]:
     """Self-service tenant organisation onboarding from the public login screen."""
     s = get_settings()
-    limiter.check(f"register_org:{ip_address or 'unknown'}", s.rate_limit_login_per_minute, 60.0)
+    db.execute(text("SELECT pg_advisory_xact_lock(738490112)"))
+    if s.environment == "production" and needs_bootstrap(db):
+        raise Forbidden(
+            "The deployment owner must initialize the platform before public registration opens."
+        )
+    limiter.check(
+        f"register_org:{ip_address or 'unknown'}", s.rate_limit_login_per_minute, 60.0
+    )
     return _create_org_and_admin_session(
         db,
         req,
@@ -368,7 +504,11 @@ def login(
 ) -> tuple[SessionResponse, str, str]:
     s = get_settings()
     norm_email = email.strip().lower()
-    limiter.check(f"login:{ip_address or 'unknown'}:{norm_email}", s.rate_limit_login_per_minute, 60.0)
+    limiter.check(
+        f"login:{ip_address or 'unknown'}:{norm_email}",
+        s.rate_limit_login_per_minute,
+        60.0,
+    )
 
     user = db.scalar(select(User).where(User.email == norm_email))
     now = utcnow()
@@ -376,7 +516,10 @@ def login(
         raise Unauthorized("Invalid email or password")
 
     if user.locked_until and user.locked_until > now:
-        raise Unauthorized("Account temporarily locked due to repeated failed attempts", code="account_locked")
+        raise Unauthorized(
+            "Account temporarily locked due to repeated failed attempts",
+            code="account_locked",
+        )
 
     if not verify_password(password, user.password_hash):
         user.failed_login_count += 1
@@ -399,11 +542,16 @@ def login(
         raise Unauthorized("Account is deactivated", code="account_inactive")
 
     memberships = db.scalars(
-        select(Membership).where(Membership.user_id == user.id, Membership.is_active.is_(True))
+        select(Membership).where(
+            Membership.user_id == user.id, Membership.is_active.is_(True)
+        )
     ).all()
     active_org_id: uuid.UUID | None = None
     if organization_id is not None:
-        allowed = any(m.organization_id == organization_id for m in memberships) or user.is_platform_admin
+        allowed = (
+            any(m.organization_id == organization_id for m in memberships)
+            or user.is_platform_admin
+        )
         if not allowed:
             raise Forbidden("You do not belong to the requested organisation")
         org = db.get(Organization, organization_id)
@@ -417,13 +565,17 @@ def login(
                 active_org_id = org.id
                 break
     elif user.is_platform_admin:
-        first_org = db.scalar(select(Organization).where(Organization.is_active.is_(True)).limit(1))
+        first_org = db.scalar(
+            select(Organization).where(Organization.is_active.is_(True)).limit(1)
+        )
         active_org_id = first_org.id if first_org else None
 
     user.failed_login_count = 0
     user.locked_until = None
     user.last_login_at = now
-    raw_session, raw_csrf, sess = _create_session(db, user, active_org_id, ip_address=ip_address, user_agent=user_agent)
+    raw_session, raw_csrf, sess = _create_session(
+        db, user, active_org_id, ip_address=ip_address, user_agent=user_agent
+    )
     audit.record(
         db,
         action="auth.login",
@@ -455,41 +607,67 @@ def logout(ctx: AuthContext) -> None:
     ctx.db.commit()
 
 
-def switch_organization(ctx: AuthContext, organization_id: uuid.UUID) -> SessionResponse:
+def switch_organization(
+    ctx: AuthContext, organization_id: uuid.UUID
+) -> SessionResponse:
     org = ctx.db.get(Organization, organization_id)
     if org is None or (not org.is_active and not ctx.user.is_platform_admin):
         raise NotFound("Organisation not found")
     membership = ctx.db.scalar(
         select(Membership).where(
-            Membership.user_id == ctx.user.id, Membership.organization_id == organization_id, Membership.is_active.is_(True)
+            Membership.user_id == ctx.user.id,
+            Membership.organization_id == organization_id,
+            Membership.is_active.is_(True),
         )
     )
     if membership is None and not ctx.user.is_platform_admin:
-        ctx.audit_denied("auth.switch_org", "organization", details={"target_org_id": str(organization_id)})
+        ctx.audit_denied(
+            "auth.switch_org",
+            "organization",
+            details={"target_org_id": str(organization_id)},
+        )
         raise Forbidden("You do not have an active membership in that organisation")
-    before = str(ctx.session.active_organization_id) if ctx.session.active_organization_id else None
+    before = (
+        str(ctx.session.active_organization_id)
+        if ctx.session.active_organization_id
+        else None
+    )
     ctx.session.active_organization_id = org.id
-    ctx.audit("auth.switch_org", "user_session", ctx.session.id, changes={"active_organization_id": {"before": before, "after": str(org.id)}})
+    ctx.audit(
+        "auth.switch_org",
+        "user_session",
+        ctx.session.id,
+        changes={"active_organization_id": {"before": before, "after": str(org.id)}},
+    )
     ctx.db.commit()
     return _session_payload(ctx.db, ctx.user, ctx.session)
 
 
-def request_password_reset(db: Session, email: str, *, ip_address: str | None = None) -> dict:
+def request_password_reset(
+    db: Session, email: str, *, ip_address: str | None = None
+) -> dict:
     s = get_settings()
     norm = email.strip().lower()
     limiter.check(f"pwreset:{ip_address or 'unknown'}", 10, 60.0)
     user = db.scalar(select(User).where(User.email == norm, User.is_active.is_(True)))
     if user is None:
-        return {"accepted": True, "delivery_status": "ignored_if_unknown"}
+        return {
+            "accepted": True,
+            "message": "If this account exists, a password setup email will be sent. Check your inbox and spam folder, or contact your facility for help.",
+        }
+    from app.services.messaging import account_link
 
-    raw_token = new_token(32)
-    prt = PasswordResetToken(
-        user_id=user.id,
-        token_hash=hash_token(raw_token),
-        purpose="reset",
-        expires_at=utcnow() + timedelta(minutes=s.password_reset_ttl_minutes),
+    membership = db.scalar(
+        select(Membership).where(
+            Membership.user_id == user.id, Membership.is_active.is_(True)
+        )
     )
-    db.add(prt)
+    account_link(
+        db,
+        user,
+        "reset",
+        organization_id=membership.organization_id if membership else None,
+    )
     audit.record(
         db,
         action="auth.password_reset_requested",
@@ -501,36 +679,63 @@ def request_password_reset(db: Session, email: str, *, ip_address: str | None = 
     )
     db.commit()
 
-    # Attempt SMTP delivery if configured
-    from app.integrations.notifications import send_email_direct
-
-    reset_url = f"{s.frontend_base_url.rstrip('/')}/reset-password?token={raw_token}"
-    delivery = send_email_direct(
-        to_address=user.email,
-        subject="Recova Password Reset",
-        body=f"A password reset was requested for your Recova account.\nReset link (expires in {s.password_reset_ttl_minutes} minutes): {reset_url}",
-    )
-    return {"accepted": True, "delivery_status": delivery["status"], "detail": delivery.get("error")}
+    return {
+        "accepted": True,
+        "message": "If this account exists, a password setup email will be sent. Check your inbox and spam folder, or contact your facility for help.",
+    }
 
 
-def confirm_password_reset(db: Session, token: str, new_password: str, *, ip_address: str | None = None) -> None:
+def confirm_password_reset(
+    db: Session, token: str, new_password: str, *, ip_address: str | None = None
+) -> None:
     problems = validate_password_strength(new_password)
     if problems:
         raise ValidationFailed("; ".join(problems))
     now = utcnow()
-    prt = db.scalar(select(PasswordResetToken).where(PasswordResetToken.token_hash == hash_token(token)))
+    prt = db.scalar(
+        select(PasswordResetToken)
+        .where(
+            PasswordResetToken.token_hash == hash_token(token),
+            PasswordResetToken.purpose.in_(["reset", "activation"]),
+        )
+        .with_for_update()
+    )
     if prt is None or prt.used_at is not None or prt.expires_at <= now:
-        raise Unauthorized("Password reset token is invalid or expired", code="invalid_token")
+        raise Unauthorized(
+            "Password reset token is invalid or expired", code="invalid_token"
+        )
     user = db.get(User, prt.user_id)
     if user is None or not user.is_active:
         raise Unauthorized("Account is inactive")
 
     user.password_hash = hash_password(new_password)
+    user.email_verified_at = user.email_verified_at or now
     user.failed_login_count = 0
     user.locked_until = None
     prt.used_at = now
+    for other in db.scalars(
+        select(PasswordResetToken).where(
+            PasswordResetToken.user_id == user.id, PasswordResetToken.used_at.is_(None)
+        )
+    ):
+        other.used_at = now
+    from app.services.messaging import cancel_pending, queue_email
+
+    cancel_pending(db, user.id, ["reset", "activation", "verify_email"])
+    queue_email(
+        db,
+        to=user.email,
+        subject="Your Recova password was updated",
+        body="Your account password was updated. If this was not you, contact your facility immediately.",
+        category="security",
+        user_id=user.id,
+    )
     # Revoke all active sessions on password reset
-    sessions = db.scalars(select(UserSession).where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))).all()
+    sessions = db.scalars(
+        select(UserSession).where(
+            UserSession.user_id == user.id, UserSession.revoked_at.is_(None)
+        )
+    ).all()
     for sess in sessions:
         sess.revoked_at = now
 
@@ -554,9 +759,30 @@ def change_password(ctx: AuthContext, current_password: str, new_password: str) 
         raise ValidationFailed("; ".join(problems))
     ctx.user.password_hash = hash_password(new_password)
     now = utcnow()
+    for token in ctx.db.scalars(
+        select(PasswordResetToken).where(
+            PasswordResetToken.user_id == ctx.user.id,
+            PasswordResetToken.used_at.is_(None),
+        )
+    ):
+        token.used_at = now
+    from app.services.messaging import cancel_pending, queue_email
+
+    cancel_pending(ctx.db, ctx.user.id, ["reset", "activation"])
+    queue_email(
+        ctx.db,
+        to=ctx.user.email,
+        subject="Your Recova password was changed",
+        body="Your password was changed while signed in. Contact your facility if this was not you.",
+        category="security",
+        user_id=ctx.user.id,
+        organization_id=ctx.org_id,
+    )
     others = ctx.db.scalars(
         select(UserSession).where(
-            UserSession.user_id == ctx.user.id, UserSession.id != ctx.session.id, UserSession.revoked_at.is_(None)
+            UserSession.user_id == ctx.user.id,
+            UserSession.id != ctx.session.id,
+            UserSession.revoked_at.is_(None),
         )
     ).all()
     for s in others:

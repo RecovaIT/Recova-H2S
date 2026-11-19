@@ -37,6 +37,7 @@ from app.models.care import (
     Referral,
     ReferralEvent,
 )
+from app.models.messaging import EmailDelivery
 from app.models.ops import (
     AuditEvent,
     BenchmarkCaseResult,

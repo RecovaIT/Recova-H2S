@@ -93,9 +93,10 @@ export const opsService = {
     full_name: string;
     role: string;
     password?: string;
+      send_activation_email?: boolean;
     preferred_language?: "en" | "ar";
     license_number?: string;
-  }): Promise<{ user: UserWithMemberships; activation_token?: string }> {
+    }): Promise<{ user: UserWithMemberships; activation?: {status:string;id?:string} | null }> {
     return api.post("/users", payload);
   },
 

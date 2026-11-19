@@ -1,0 +1,13 @@
+"use client";
+import {useState} from "react";
+import {useAuth} from "@/hooks/useAuth";
+import {authService} from "@/services/auth";
+import {api} from "@/lib/api";
+import {Button} from "@/components/ui/button";
+import {Input,Label} from "@/components/ui/input";
+export function AccountSecurityPanel(){
+ const {session}=useAuth();const [current,setCurrent]=useState(""),[password,setPassword]=useState(""),[repeat,setRepeat]=useState(""),[message,setMessage]=useState(""),[busy,setBusy]=useState(false);
+ async function change(e:React.FormEvent){e.preventDefault();setBusy(true);try{if(password!==repeat)throw new Error("New passwords do not match");await authService.changePassword(current,password);setCurrent("");setPassword("");setRepeat("");setMessage("Password changed. Other signed-in sessions were revoked.")}catch(e){setMessage(e instanceof Error?e.message:"Password change failed")}finally{setBusy(false)}}
+ async function verify(){setBusy(true);try{const r=await api.post<{status:string}>("/auth/resend-verification");setMessage(r.status==="not_configured"?"Verification email is waiting for the server sender to be configured. Contact your facility.":"Verification email queued. Check your inbox and spam folder.")}catch(e){setMessage(e instanceof Error?e.message:"Could not request verification")}finally{setBusy(false)}}
+ return <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5"><h2 className="font-semibold">Account security</h2><p className="break-all text-sm">{session?.user?.email}</p><p className="text-xs text-slate-600">{session?.user?.email_verified_at?"Email address verified":"Email address has not been verified yet."}</p>{!session?.user?.email_verified_at&&<Button variant="outline" disabled={busy} onClick={()=>void verify()}>Send verification email</Button>}{message&&<p role="status" className="text-sm">{message}</p>}<form onSubmit={change} className="space-y-3"><div><Label htmlFor="current-password">Current password</Label><Input id="current-password" autoComplete="current-password" type="password" required value={current} onChange={e=>setCurrent(e.target.value)}/></div><div><Label htmlFor="new-password">New password</Label><Input id="new-password" autoComplete="new-password" type="password" required minLength={10} value={password} onChange={e=>setPassword(e.target.value)}/></div><div><Label htmlFor="repeat-password">Confirm new password</Label><Input id="repeat-password" autoComplete="new-password" type="password" required value={repeat} onChange={e=>setRepeat(e.target.value)}/></div><p className="text-xs text-slate-500">Use at least 10 characters, including a letter and a number.</p><Button disabled={busy} type="submit">Change password</Button></form></section>
+}

@@ -25,6 +25,8 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
+import { EmailDeliveryPanel } from "@/components/EmailDeliveryPanel";
+import { api } from "@/lib/api";
 
 const ADMIN_TABS = new Set(["users", "rbac", "orgs", "audit", "jobs"]);
 
@@ -113,18 +115,19 @@ function AdminPageContent() {
     e.preventDefault();
     setBusy(true);
     try {
-      await opsService.createUser({
+      const result = await opsService.createUser({
         email: uEmail.trim(),
         full_name: uName.trim(),
         role: uRole,
-        password: uPassword,
+        password: uPassword || undefined,
+        send_activation_email: true,
         license_number: uLicense.trim() || undefined,
       });
       setUEmail("");
       setUName("");
       setUPassword("");
       setULicense("");
-      pushToast("User added to active organisation", "success");
+      pushToast("User added to active organisation", result.activation?.status === "not_configured" ? "info" : "success", result.activation?.status === "not_configured" ? "Setup email is waiting for server SMTP configuration. See email deliveries below." : "A private setup email has been queued. Check email deliveries for its status.");
       await loadAdmin();
     } catch (err) {
       pushToast("Failed to create user", "error", err instanceof Error ? err.message : undefined);
@@ -136,11 +139,23 @@ function AdminPageContent() {
   const toggleUserActive = async (u: UserWithMemberships) => {
     try {
       await opsService.updateUser(u.id, { is_active: !u.is_active });
-      pushToast(u.is_active ? "User deactivated" : "User activated", "info");
+      pushToast(u.is_active ? "Access disabled" : "Access restored", "info", session?.user.is_platform_admin ? "This changes the global account." : "This changes access to this facility only.");
       await loadAdmin();
     } catch (err) {
       pushToast("Update failed", "error", err instanceof Error ? err.message : undefined);
     }
+  };
+
+  const updateLicense = async (u: UserWithMemberships) => {
+    const value=window.prompt("Enter the practitioner's actual professional licence number. This is recorded for clinical sign-off; it is not independent licence verification.",u.license_number || "");
+    if(value===null)return;
+    try { await opsService.updateUser(u.id,{license_number:value.trim()}); await loadAdmin(); pushToast("Professional licence record updated","success"); }
+    catch(e){pushToast("Could not update licence","error",e instanceof Error?e.message:undefined)}
+  };
+
+  const resendSetup = async (id:string) => {
+    try { const res=await api.post<{status:string}>(`/users/${id}/resend-activation`); pushToast("Setup email requested", "info", `Delivery status: ${res.status}. See email deliveries below.`); }
+    catch(e){pushToast("Could not resend setup", "error",e instanceof Error?e.message:undefined)}
   };
 
   const handleSaveOverride = async (e: React.FormEvent) => {
@@ -258,12 +273,11 @@ function AdminPageContent() {
                       <Input value={uLicense} onChange={(e) => setULicense(e.target.value)} />
                     </div>
                     <div className="space-y-1 sm:col-span-4">
-                      <Label htmlFor="admin-user-password">Initial Password (min 10 chars)</Label>
+                      <Label htmlFor="admin-user-password">Optional initial password (recipient sets their own by email)</Label>
                       <div className="relative">
                         <Input
                           id="admin-user-password"
                           type={showPassword ? "text" : "password"}
-                          required
                           minLength={10}
                           value={uPassword}
                           onChange={(e) => setUPassword(e.target.value)}
@@ -317,9 +331,13 @@ function AdminPageContent() {
                           <StatusBadge status={u.is_active ? "completed" : "rejected"} />
                         </TableCell>
                         <TableCell className="text-right">
+                          {hasPermission("users:manage") && <Button size="sm" variant="outline" onClick={()=>void updateLicense(u)}>Licence</Button>}
+                          {hasPermission("users:manage") && u.is_active && !u.email_verified_at && (
+                            <Button size="sm" variant="ghost" onClick={()=>void resendSetup(u.id)}>Resend setup</Button>
+                          )}
                           {hasPermission("users:manage") && (
                             <Button size="sm" variant="outline" onClick={() => void toggleUserActive(u)}>
-                              {u.is_active ? "Deactivate" : "Reactivate"}
+                              {u.is_active ? (session?.user.is_platform_admin ? "Disable account" : "Disable facility access") : "Restore access"}
                             </Button>
                           )}
                         </TableCell>
@@ -329,6 +347,7 @@ function AdminPageContent() {
                 </Table>
               </CardContent>
             </Card>
+            <EmailDeliveryPanel />
           </TabsContent>
 
           <TabsContent value="rbac" className="space-y-4">
