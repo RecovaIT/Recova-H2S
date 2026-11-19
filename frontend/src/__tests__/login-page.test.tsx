@@ -83,7 +83,7 @@ describe("LoginPage & Tenant Onboarding", () => {
 
     render(
       <AuthProvider>
-        <OrganizationOnboardingCard mode="register" />
+        <OrganizationOnboardingCard mode="register" initialProgramme="loop" />
       </AuthProvider>
     );
 
@@ -94,7 +94,7 @@ describe("LoginPage & Tenant Onboarding", () => {
     await user.type(screen.getByLabelText(/admin email/i), "admin@dubai-care.ae");
     await user.type(screen.getByLabelText(/^password/i), "DubaiClinicPass123!");
     await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("button", { name: /recova loop/i }));
+    expect(screen.getByRole("button", { name: /recova loop/i })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: /continue/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
     expect(screen.getByRole("checkbox", { name: /I confirm the shared/i })).not.toBeChecked();

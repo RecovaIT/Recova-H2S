@@ -93,7 +93,7 @@ function slugifyOrgName(value: string): string {
     .slice(0, 80);
 }
 
-export function OrganizationOnboardingCard({ mode }: { mode: "bootstrap" | "register" }) {
+export function OrganizationOnboardingCard({ mode, initialProgramme = "core" }: { mode: "bootstrap" | "register"; initialProgramme?: ProgrammeId }) {
   const { bootstrap, registerOrganization } = useAuth();
   const router = useRouter();
 
@@ -103,7 +103,7 @@ export function OrganizationOnboardingCard({ mode }: { mode: "bootstrap" | "regi
   const [slugEdited, setSlugEdited] = useState(false);
   const [orgType, setOrgType] = useState<OrgType>("hospital");
   const [emirate, setEmirate] = useState("Abu Dhabi");
-  const [primaryProgramme, setPrimaryProgramme] = useState<ProgrammeId>("core");
+  const [primaryProgramme, setPrimaryProgramme] = useState<ProgrammeId>(initialProgramme);
 
   const [fullName, setFullName] = useState("");
   const [license, setLicense] = useState("");
