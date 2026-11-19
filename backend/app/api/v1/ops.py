@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import AuthContext, requires
 from app.agents.gate1_consent import evaluate_consents
+from app.core import audit
 from app.models.base import utcnow
 from app.benchmarks.runner import create_benchmark_run, execute_benchmark_run
 from app.benchmarks.suites import BENCHMARK_SUITE, SUITE_NAME, SUITE_VERSION
@@ -23,7 +25,7 @@ from app.models.care import CareFacility, ClinicalReview, InsurancePlan, Notific
 from app.models.clinical import Consent, Observation, Patient, ScreeningRecord, TrackEnrollment
 from app.models.engine import AgentStepResult, EmergencyEvent, PipelineRun, ScoringResult
 from app.models.enums import ConsentScope, ConsentStatus, EmergencyStatus, ReferralStatus, SlaStatus
-from app.models.identity import Membership, Organization
+from app.models.identity import Membership, Organization, User
 from app.models.ops import BenchmarkRun, IntegrationConfig
 from app.schemas.workflow import (
     BenchmarkRunCreate,
@@ -125,68 +127,68 @@ def _benchmark_detail(ctx: AuthContext, benchmark_run_id: uuid.UUID) -> Benchmar
     return out
 
 
-# --- FHIR R4 ---
-@fhir_router.get("/patients/{patient_id}/bundle")
-def export_patient_fhir_bundle(
+def _build_patient_fhir_export(
+    db: Session,
+    *,
+    org: Organization,
     patient_id: uuid.UUID,
-    bundle_type: str = Query("transaction", pattern="^(transaction|collection)$"),
-    ctx: AuthContext = Depends(requires(P.FHIR_EXPORT)),
-):
-    patient = ctx.db.scalar(
-        select(Patient).where(Patient.id == patient_id, Patient.organization_id == ctx.org_id, Patient.is_synthetic.is_(False))
+    bundle_type: str = "transaction",
+    fallback_practitioner: User | None = None,
+) -> tuple[Patient, dict, dict]:
+    patient = db.scalar(
+        select(Patient).where(Patient.id == patient_id, Patient.organization_id == org.id, Patient.is_synthetic.is_(False))
     )
     if patient is None:
         raise NotFound("Patient not found")
     consents = list(
-        ctx.db.scalars(
-            select(Consent).where(Consent.organization_id == ctx.org_id, Consent.patient_id == patient.id).order_by(Consent.effective_at.desc())
+        db.scalars(
+            select(Consent).where(Consent.organization_id == org.id, Consent.patient_id == patient.id).order_by(Consent.effective_at.desc())
         ).all()
     )
-    active, _ = evaluate_consents(ctx.db, patient, utcnow())
+    active, _ = evaluate_consents(db, patient, utcnow())
     if ConsentScope.HIE_SHARING.value not in active:
         raise Forbidden("Active HIE/FHIR sharing consent is required")
 
     observations = list(
-        ctx.db.scalars(
+        db.scalars(
             select(Observation)
-            .where(Observation.organization_id == ctx.org_id, Observation.patient_id == patient.id)
+            .where(Observation.organization_id == org.id, Observation.patient_id == patient.id)
             .order_by(Observation.effective_at.desc())
             .limit(50)
         ).all()
     )
-    plan = ctx.db.get(InsurancePlan, patient.insurance_plan_id) if patient.insurance_plan_id else None
-    latest_run = ctx.db.scalar(
+    plan = db.get(InsurancePlan, patient.insurance_plan_id) if patient.insurance_plan_id else None
+    latest_run = db.scalar(
         select(PipelineRun)
-        .where(PipelineRun.organization_id == ctx.org_id, PipelineRun.patient_id == patient.id)
+        .where(PipelineRun.organization_id == org.id, PipelineRun.patient_id == patient.id)
         .order_by(PipelineRun.created_at.desc())
         .limit(1)
     )
-    latest_scoring = ctx.db.scalar(select(ScoringResult).where(ScoringResult.run_id == latest_run.id)) if latest_run else None
-    latest_review = ctx.db.scalar(
+    latest_scoring = db.scalar(select(ScoringResult).where(ScoringResult.run_id == latest_run.id)) if latest_run else None
+    latest_review = db.scalar(
         select(ClinicalReview).where(ClinicalReview.run_id == latest_run.id).order_by(ClinicalReview.signed_at.desc()).limit(1)
     ) if latest_run else None
-    practitioner = ctx.db.get(type(ctx.user), patient.primary_clinician_id) if patient.primary_clinician_id else ctx.user
+    practitioner = db.get(User, patient.primary_clinician_id) if patient.primary_clinician_id else fallback_practitioner
     refs = list(
-        ctx.db.scalars(
-            select(Referral).where(Referral.organization_id == ctx.org_id, Referral.patient_id == patient.id).order_by(Referral.created_at.desc()).limit(10)
+        db.scalars(
+            select(Referral).where(Referral.organization_id == org.id, Referral.patient_id == patient.id).order_by(Referral.created_at.desc()).limit(10)
         ).all()
     )
-    facilities = {f.id: f for f in ctx.db.scalars(select(CareFacility).where(CareFacility.organization_id == ctx.org_id)).all()}
+    facilities = {f.id: f for f in db.scalars(select(CareFacility).where(CareFacility.organization_id == org.id)).all()}
     ref_pairs = [(r, facilities.get(r.facility_id) if r.facility_id else None) for r in refs]
     screenings = list(
-        ctx.db.scalars(
-            select(ScreeningRecord).where(ScreeningRecord.organization_id == ctx.org_id, ScreeningRecord.patient_id == patient.id).order_by(ScreeningRecord.screened_at.desc()).limit(5)
+        db.scalars(
+            select(ScreeningRecord).where(ScreeningRecord.organization_id == org.id, ScreeningRecord.patient_id == patient.id).order_by(ScreeningRecord.screened_at.desc()).limit(5)
         ).all()
     )
     notifs = list(
-        ctx.db.scalars(
-            select(Notification).where(Notification.organization_id == ctx.org_id, Notification.recipient_patient_id == patient.id).order_by(Notification.created_at.desc()).limit(10)
+        db.scalars(
+            select(Notification).where(Notification.organization_id == org.id, Notification.recipient_patient_id == patient.id).order_by(Notification.created_at.desc()).limit(10)
         ).all()
     )
 
-    assert ctx.organization is not None
     bundle = build_patient_fhir_bundle(
-        org=ctx.organization,
+        org=org,
         patient=patient,
         consents=consents,
         observations=observations,
@@ -201,6 +203,83 @@ def export_patient_fhir_bundle(
         bundle_type=bundle_type,
     )
     validation = validate_fhir_bundle(bundle)
+    return patient, bundle, validation
+
+
+def execute_malaffi_push_for_patient(
+    db: Session,
+    *,
+    organization_id: uuid.UUID,
+    patient_id: uuid.UUID,
+    attempt: int = 1,
+    fallback_practitioner: User | None = None,
+    raise_on_auth_error: bool = True,
+) -> dict:
+    from app.tasks.queue import enqueue
+
+    org = db.get(Organization, organization_id)
+    if org is None:
+        return {"status": "skipped", "reason": "organization_not_found"}
+    try:
+        patient, bundle, _ = _build_patient_fhir_export(
+            db,
+            org=org,
+            patient_id=patient_id,
+            bundle_type="transaction",
+            fallback_practitioner=fallback_practitioner,
+        )
+    except (NotFound, Forbidden) as exc:
+        if raise_on_auth_error:
+            raise
+        return {"status": "cancelled", "submitted": False, "message": str(exc.detail)}
+
+    row = db.scalar(
+        select(IntegrationConfig).where(IntegrationConfig.organization_id == org.id, IntegrationConfig.integration == "malaffi")
+    )
+    org_cfg = dict(row.settings) if row and row.enabled else {}
+    if row and row.enabled and row.secrets_encrypted:
+        raw = decrypt_str(row.secrets_encrypted)
+        if raw:
+            org_cfg.update(json.loads(raw))
+    res = push_fhir_bundle(bundle, org_cfg or None)
+    if res.get("status") == "error" and attempt < 3:
+        run_after = utcnow() + timedelta(seconds=30 * 4 ** max(0, attempt - 1))
+        enqueue(
+            db,
+            "hie.push_malaffi",
+            {"patient_id": str(patient.id), "attempt": attempt + 1},
+            organization_id=org.id,
+            run_after=run_after,
+            max_attempts=1,
+        )
+        res = {**res, "queued_retry": True, "attempt": attempt}
+    audit.record(
+        db,
+        action="fhir.push_malaffi",
+        resource_type="patient",
+        resource_id=patient.id,
+        organization_id=org.id,
+        patient_id=patient.id,
+        details={"status": res.get("status"), "attempt": attempt, "queued_retry": bool(res.get("queued_retry"))},
+    )
+    return res
+
+
+# --- FHIR R4 ---
+@fhir_router.get("/patients/{patient_id}/bundle")
+def export_patient_fhir_bundle(
+    patient_id: uuid.UUID,
+    bundle_type: str = Query("transaction", pattern="^(transaction|collection)$"),
+    ctx: AuthContext = Depends(requires(P.FHIR_EXPORT)),
+):
+    assert ctx.organization is not None
+    patient, bundle, validation = _build_patient_fhir_export(
+        ctx.db,
+        org=ctx.organization,
+        patient_id=patient_id,
+        bundle_type=bundle_type,
+        fallback_practitioner=ctx.user,
+    )
     ctx.audit("fhir.export", "patient", patient.id, patient_id=patient.id, details={"valid": validation["valid"], "entries": validation["total_entries"]})
     ctx.db.commit()
     return {"bundle": bundle, "validation": validation}
@@ -213,17 +292,13 @@ def validate_bundle(bundle: dict, ctx: AuthContext = Depends(requires(P.FHIR_EXP
 
 @fhir_router.post("/patients/{patient_id}/push-malaffi")
 def push_to_malaffi(patient_id: uuid.UUID, ctx: AuthContext = Depends(requires(P.FHIR_EXPORT))):
-    exported = export_patient_fhir_bundle(patient_id, bundle_type="transaction", ctx=ctx)
-    row = ctx.db.scalar(
-        select(IntegrationConfig).where(IntegrationConfig.organization_id == ctx.org_id, IntegrationConfig.integration == "malaffi")
+    res = execute_malaffi_push_for_patient(
+        ctx.db,
+        organization_id=ctx.org_id,
+        patient_id=patient_id,
+        attempt=1,
+        fallback_practitioner=ctx.user,
     )
-    org_cfg = dict(row.settings) if row else {}
-    if row and row.secrets_encrypted:
-        raw = decrypt_str(row.secrets_encrypted)
-        if raw:
-            org_cfg.update(json.loads(raw))
-    res = push_fhir_bundle(exported["bundle"], org_cfg or None)
-    ctx.audit("fhir.push_malaffi", "patient", patient_id, patient_id=patient_id, details={"status": res.get("status")})
     ctx.db.commit()
     return res
 

@@ -74,4 +74,26 @@ def handle_email(db: Session, job: Job) -> dict:
     return deliver_email(db, uuid.UUID(job.payload["email_id"]))
 
 
+@register("notification.deliver")
+def handle_notification_deliver(db: Session, job: Job) -> dict:
+    from app.integrations.notifications import deliver_notification_retry
+
+    return deliver_notification_retry(db, uuid.UUID(job.payload["notification_id"]))
+
+
+@register("hie.push_malaffi")
+def handle_hie_push_malaffi(db: Session, job: Job) -> dict:
+    from app.api.v1.ops import execute_malaffi_push_for_patient
+
+    if job.organization_id is None:
+        return {"status": "skipped", "reason": "missing_organization_id"}
+    return execute_malaffi_push_for_patient(
+        db,
+        organization_id=job.organization_id,
+        patient_id=uuid.UUID(job.payload["patient_id"]),
+        attempt=int(job.payload.get("attempt", 2)),
+        raise_on_auth_error=False,
+    )
+
+
 periodic("referrals.sla_monitor", every_seconds=300)

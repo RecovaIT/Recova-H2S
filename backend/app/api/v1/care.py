@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import hmac
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app.api.deps import AuthContext, requires
+from app.core import audit
+from app.core.config import get_settings
+from app.core.db import get_db
+from app.core.errors import Forbidden
 from app.core.permissions import P
 from app.schemas.common import Page, PageParams
 from app.schemas.workflow import (
@@ -200,3 +206,125 @@ def read_notification(
     ctx: AuthContext = Depends(requires(P.NOTIFICATIONS_READ)),
 ):
     return care_svc.mark_notification_read(ctx, notification_id)
+
+
+@notifications_router.post("/{notification_id}/retry", response_model=NotificationOut)
+def retry_notification(
+    notification_id: uuid.UUID,
+    ctx: AuthContext = Depends(requires(P.USERS_MANAGE)),
+):
+    from app.integrations.notifications import retry_notification_manual
+
+    notif = retry_notification_manual(ctx.db, ctx.org_id, notification_id)
+    ctx.audit(
+        "notification.retry",
+        "notification",
+        notif.id,
+        patient_id=notif.recipient_patient_id,
+        details={"channel": notif.channel, "status": notif.status, "attempts": notif.attempts},
+    )
+    ctx.db.commit()
+    ctx.db.refresh(notif)
+    return notif
+
+
+@notifications_router.post("/webhooks/twilio-status")
+async def twilio_status_webhook(request: Request, db=Depends(get_db)):
+    from app.integrations.notifications import (
+        _load_org_integration,
+        apply_provider_receipt,
+        verify_twilio_signature,
+    )
+    from app.models.care import Notification
+
+    form = await request.form()
+    params = {str(k): str(v) for k, v in form.items()}
+    sid = params.get("MessageSid") or params.get("SmsSid") or ""
+    msg_status = params.get("MessageStatus") or params.get("SmsStatus") or ""
+    if not sid or not msg_status:
+        return {"updated": False, "reason": "missing_sid_or_status"}
+
+    notif = db.scalar(select(Notification).where(Notification.provider_message_id == sid))
+    org_cfg = _load_org_integration(db, notif.organization_id, "twilio") if notif else None
+    auth_token = (org_cfg or {}).get("auth_token") or get_settings().twilio_auth_token
+    sig = request.headers.get("X-Twilio-Signature", "")
+    if not auth_token:
+        raise Forbidden("Twilio webhook signature verification is not configured")
+    raw_url = str(request.url)
+    candidate_urls = [raw_url]
+    if request.headers.get("x-forwarded-proto") == "https" and raw_url.startswith("http://"):
+        candidate_urls.append("https://" + raw_url[len("http://"):])
+    if not any(verify_twilio_signature(u, params, sig, auth_token) for u in candidate_urls):
+        raise Forbidden("Invalid Twilio webhook signature")
+
+    if notif is None:
+        return {"updated": False, "reason": "unknown_message_sid"}
+    err_parts = [p for p in [params.get("ErrorCode"), params.get("ErrorMessage")] if p]
+    apply_provider_receipt(
+        db,
+        notif=notif,
+        provider_status=msg_status,
+        error_detail=" ".join(err_parts) if err_parts else None,
+    )
+    audit.record(
+        db,
+        action="notification.delivery_receipt",
+        resource_type="notification",
+        resource_id=notif.id,
+        organization_id=notif.organization_id,
+        patient_id=notif.recipient_patient_id,
+        details={"provider": "twilio", "status": notif.status, "provider_status": msg_status},
+    )
+    db.commit()
+    return {"updated": True, "notification_id": str(notif.id), "status": notif.status}
+
+
+class SahatnaReceiptPayload(BaseModel):
+    message_id: str = Field(..., min_length=1, max_length=200)
+    status: str = Field(..., min_length=1, max_length=40)
+    detail: str | None = Field(default=None, max_length=500)
+
+
+@notifications_router.post("/webhooks/sahatna-status")
+def sahatna_status_webhook(
+    req: SahatnaReceiptPayload,
+    request: Request,
+    db=Depends(get_db),
+):
+    from app.integrations.notifications import _load_org_integration, apply_provider_receipt
+    from app.models.care import Notification
+
+    notif = db.scalar(
+        select(Notification).where(
+            Notification.provider == "sahatna",
+            Notification.provider_message_id == req.message_id,
+        )
+    )
+    org_cfg = _load_org_integration(db, notif.organization_id, "sahatna") if notif else None
+    api_key = (org_cfg or {}).get("api_key") or get_settings().sahatna_api_key
+    if not api_key:
+        raise Forbidden("Sahatna webhook verification is not configured")
+    auth_hdr = request.headers.get("Authorization", "")
+    token = auth_hdr[7:].strip() if auth_hdr.startswith("Bearer ") else ""
+    if not token or not hmac.compare_digest(token, api_key):
+        raise Forbidden("Invalid Sahatna webhook credentials")
+
+    if notif is None:
+        return {"updated": False, "reason": "unknown_message_id"}
+    apply_provider_receipt(
+        db,
+        notif=notif,
+        provider_status=req.status,
+        error_detail=req.detail,
+    )
+    audit.record(
+        db,
+        action="notification.delivery_receipt",
+        resource_type="notification",
+        resource_id=notif.id,
+        organization_id=notif.organization_id,
+        patient_id=notif.recipient_patient_id,
+        details={"provider": "sahatna", "status": notif.status, "provider_status": req.status},
+    )
+    db.commit()
+    return {"updated": True, "notification_id": str(notif.id), "status": notif.status}
