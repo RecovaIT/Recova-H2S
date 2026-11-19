@@ -268,18 +268,28 @@ def test_integration(name: str, ctx: AuthContext = Depends(requires(P.SETTINGS_M
 @reports_router.get("/overview")
 def organization_overview(ctx: AuthContext = Depends(requires(P.ORG_READ))):
     org_id = ctx.org_id
+    real_patient_ids = select(Patient.id).where(Patient.organization_id == org_id, Patient.is_synthetic.is_(False))
     active_patients = ctx.db.scalar(
         select(func.count(Patient.id)).where(Patient.organization_id == org_id, Patient.is_active.is_(True), Patient.is_synthetic.is_(False))
     ) or 0
     open_emergencies = ctx.db.scalar(
-        select(func.count(EmergencyEvent.id)).where(EmergencyEvent.organization_id == org_id, EmergencyEvent.status == EmergencyStatus.OPEN.value)
+        select(func.count(EmergencyEvent.id)).where(
+            EmergencyEvent.organization_id == org_id,
+            EmergencyEvent.status == EmergencyStatus.OPEN.value,
+            EmergencyEvent.patient_id.in_(real_patient_ids),
+        )
     ) or 0
     pending_referrals = ctx.db.scalar(
-        select(func.count(Referral.id)).where(Referral.organization_id == org_id, Referral.status == ReferralStatus.PROPOSED.value)
+        select(func.count(Referral.id)).where(
+            Referral.organization_id == org_id,
+            Referral.status == ReferralStatus.PROPOSED.value,
+            Referral.patient_id.in_(real_patient_ids),
+        )
     ) or 0
     open_referrals = ctx.db.scalar(
         select(func.count(Referral.id)).where(
             Referral.organization_id == org_id,
+            Referral.patient_id.in_(real_patient_ids),
             Referral.status.in_([
                 ReferralStatus.PROPOSED.value,
                 ReferralStatus.APPROVED.value,
@@ -291,18 +301,34 @@ def organization_overview(ctx: AuthContext = Depends(requires(P.ORG_READ))):
         )
     ) or 0
     verified_outcomes = ctx.db.scalar(
-        select(func.count(Referral.id)).where(Referral.organization_id == org_id, Referral.status == ReferralStatus.OUTCOME_VERIFIED.value)
+        select(func.count(Referral.id)).where(
+            Referral.organization_id == org_id,
+            Referral.status == ReferralStatus.OUTCOME_VERIFIED.value,
+            Referral.patient_id.in_(real_patient_ids),
+        )
     ) or 0
     sla_breaches = ctx.db.scalar(
-        select(func.count(Referral.id)).where(Referral.organization_id == org_id, Referral.sla_status == SlaStatus.BREACHED.value)
+        select(func.count(Referral.id)).where(
+            Referral.organization_id == org_id,
+            Referral.sla_status == SlaStatus.BREACHED.value,
+            Referral.patient_id.in_(real_patient_ids),
+        )
     ) or 0
     total_runs = ctx.db.scalar(
-        select(func.count(PipelineRun.id)).where(PipelineRun.organization_id == org_id, PipelineRun.benchmark_run_id.is_(None))
+        select(func.count(PipelineRun.id)).where(
+            PipelineRun.organization_id == org_id,
+            PipelineRun.benchmark_run_id.is_(None),
+            PipelineRun.patient_id.in_(real_patient_ids),
+        )
     ) or 0
 
     tier_rows = ctx.db.execute(
         select(TrackEnrollment.track, TrackEnrollment.latest_risk_tier, func.count(TrackEnrollment.id))
-        .where(TrackEnrollment.organization_id == org_id, TrackEnrollment.status == "active")
+        .where(
+            TrackEnrollment.organization_id == org_id,
+            TrackEnrollment.status == "active",
+            TrackEnrollment.patient_id.in_(real_patient_ids),
+        )
         .group_by(TrackEnrollment.track, TrackEnrollment.latest_risk_tier)
     ).all()
     track_distribution: dict[str, dict[str, int]] = {}
@@ -312,7 +338,7 @@ def organization_overview(ctx: AuthContext = Depends(requires(P.ORG_READ))):
 
     referral_rows = ctx.db.execute(
         select(Referral.status, func.count(Referral.id))
-        .where(Referral.organization_id == org_id)
+        .where(Referral.organization_id == org_id, Referral.patient_id.in_(real_patient_ids))
         .group_by(Referral.status)
     ).all()
     referral_funnel = {st: int(cnt) for st, cnt in referral_rows}
@@ -337,38 +363,41 @@ def platform_overview(ctx: AuthContext = Depends(requires(P.ORG_READ))):
     if not ctx.user.is_platform_admin:
         raise Forbidden("Platform overview requires platform administrator context.")
 
-    orgs = ctx.db.scalars(select(Organization).where(Organization.is_active.is_(True)).order_by(Organization.name)).all()
+    all_orgs = ctx.db.scalars(select(Organization).where(Organization.is_active.is_(True)).order_by(Organization.name)).all()
+    orgs = [o for o in all_orgs if not (o.settings or {}).get("synthetic_demo")]
+    live_org_ids = [o.id for o in orgs]
+    real_patient_ids = select(Patient.id).where(Patient.is_active.is_(True), Patient.is_synthetic.is_(False))
     patient_counts = dict(
         ctx.db.execute(
             select(Patient.organization_id, func.count(Patient.id))
-            .where(Patient.is_active.is_(True), Patient.is_synthetic.is_(False))
+            .where(Patient.is_active.is_(True), Patient.is_synthetic.is_(False), Patient.organization_id.in_(live_org_ids))
             .group_by(Patient.organization_id)
         ).all()
-    )
+    ) if live_org_ids else {}
     user_counts = dict(
         ctx.db.execute(
             select(Membership.organization_id, func.count(Membership.id))
-            .where(Membership.is_active.is_(True))
+            .where(Membership.is_active.is_(True), Membership.organization_id.in_(live_org_ids))
             .group_by(Membership.organization_id)
         ).all()
-    )
+    ) if live_org_ids else {}
     run_counts = dict(
         ctx.db.execute(
             select(PipelineRun.organization_id, func.count(PipelineRun.id))
-            .where(PipelineRun.benchmark_run_id.is_(None))
+            .where(PipelineRun.benchmark_run_id.is_(None), PipelineRun.patient_id.in_(real_patient_ids))
             .group_by(PipelineRun.organization_id)
         ).all()
     )
     emergency_counts = dict(
         ctx.db.execute(
             select(EmergencyEvent.organization_id, func.count(EmergencyEvent.id))
-            .where(EmergencyEvent.status == EmergencyStatus.OPEN.value)
+            .where(EmergencyEvent.status == EmergencyStatus.OPEN.value, EmergencyEvent.patient_id.in_(real_patient_ids))
             .group_by(EmergencyEvent.organization_id)
         ).all()
     )
     tier_rows = ctx.db.execute(
         select(TrackEnrollment.organization_id, TrackEnrollment.track, TrackEnrollment.latest_risk_tier, func.count(TrackEnrollment.id))
-        .where(TrackEnrollment.status == "active")
+        .where(TrackEnrollment.status == "active", TrackEnrollment.patient_id.in_(real_patient_ids))
         .group_by(TrackEnrollment.organization_id, TrackEnrollment.track, TrackEnrollment.latest_risk_tier)
     ).all()
 

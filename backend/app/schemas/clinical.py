@@ -23,6 +23,8 @@ class EnrollmentOut(ORMModel):
     latest_risk_tier: str | None = None
     latest_run_id: uuid.UUID | None = None
     latest_run_at: datetime | None = None
+    authority_reason: str | None = None
+    history: list = Field(default_factory=list)
 
 
 class PatientCreate(BaseModel):
@@ -47,7 +49,7 @@ class PatientCreate(BaseModel):
     department_id: uuid.UUID | None = None
     job_role: str | None = Field(default=None, max_length=120)
     primary_clinician_id: uuid.UUID | None = None
-    tracks: list[Track] = Field(default_factory=lambda: [Track.CORE])
+    tracks: list[Track] | None = None
 
 
 class PatientUpdate(BaseModel):
@@ -106,12 +108,15 @@ class PatientDetailOut(PatientSummaryOut):
 class EnrollmentCreate(BaseModel):
     track: Track
     context: dict[str, Any] = Field(default_factory=dict)
+    reason: str | None = Field(default=None, max_length=500)
 
 
 class ConsentCreate(BaseModel):
     patient_id: uuid.UUID
     scope: ConsentScope
     method: Literal["written", "verbal_witnessed", "electronic", "guardian"] = "electronic"
+    policy_version: str = Field(default="v1.0", max_length=40)
+    authority_to_act: str = Field(default="self", max_length=80)
     granted_by_name: str | None = Field(default=None, max_length=200)
     effective_at: datetime | None = None
     expires_at: datetime | None = None
@@ -126,6 +131,8 @@ class ConsentOut(ORMModel):
     scope: str
     status: str
     method: str
+    policy_version: str = "v1.0"
+    authority_to_act: str = "self"
     granted_by_name: str | None = None
     effective_at: datetime
     expires_at: datetime | None = None

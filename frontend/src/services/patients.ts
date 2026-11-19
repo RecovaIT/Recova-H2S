@@ -87,4 +87,20 @@ export const patientsService = {
   revokeConsent(consentId: string, reason?: string): Promise<Consent> {
     return api.post(`/consents/${consentId}/revoke`, undefined, reason ? { reason } : undefined);
   },
+
+  issuePortalInvitation(
+    patientId: string,
+    recipientEmail: string
+  ): Promise<{
+    invitation_id: string;
+    patient_id: string;
+    organization_id: string;
+    organization_name?: string | null;
+    primary_programme?: string | null;
+    recipient_email: string;
+    expires_at: string;
+    invitation_token: string;
+  }> {
+    return api.post(`/patients/${patientId}/portal-invitations`, { recipient_email: recipientEmail });
+  },
 };

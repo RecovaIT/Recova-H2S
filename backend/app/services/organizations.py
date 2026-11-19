@@ -21,6 +21,7 @@ from app.schemas.identity import (
     MembershipUpdateRequest,
     OrganizationCreate,
     OrganizationUpdate,
+    PrimaryProgrammeSelectionRequest,
     RolePermissionOverrideInput,
     UserCreateRequest,
     UserUpdateRequest,
@@ -46,13 +47,23 @@ def create_organization(ctx: AuthContext, req: OrganizationCreate) -> Organizati
     existing = ctx.db.scalar(select(Organization).where(Organization.slug == req.slug.lower()))
     if existing:
         raise Conflict(f"Organisation slug '{req.slug}' already exists")
+    tracks = list(dict.fromkeys(t.value for t in req.enabled_tracks))
+    if not tracks:
+        raise ValidationFailed("At least one track must be enabled")
+    primary_prog = req.primary_programme.value if req.primary_programme else (tracks[0] if len(tracks) == 1 else tracks[0])
+    if primary_prog not in tracks:
+        tracks.insert(0, primary_prog)
+    config_status = "configured" if (req.primary_programme is not None or len(tracks) == 1) else "pending_selection"
     org = Organization(
         name=req.name.strip(),
         slug=req.slug.strip().lower(),
         org_type=req.org_type,
-        enabled_tracks=[t.value for t in req.enabled_tracks],
+        primary_programme=primary_prog,
+        programme_configuration_status=config_status,
+        enabled_tracks=tracks,
         country=req.country,
         emirate=req.emirate,
+        settings={"shared_population_health_provisioned": True},
         data_retention_days=req.data_retention_days,
     )
     ctx.db.add(org)
@@ -65,7 +76,7 @@ def create_organization(ctx: AuthContext, req: OrganizationCreate) -> Organizati
         department_ids=[],
     )
     ctx.db.add(membership)
-    ctx.audit("organization.create", "organization", org.id, details={"slug": org.slug})
+    ctx.audit("organization.create", "organization", org.id, details={"slug": org.slug, "primary_programme": primary_prog})
     ctx.db.commit()
     return org
 
@@ -90,7 +101,9 @@ def update_organization(ctx: AuthContext, org_id: uuid.UUID, req: OrganizationUp
     if req.org_type is not None:
         org.org_type = req.org_type
     if req.enabled_tracks is not None:
-        org.enabled_tracks = [t.value for t in req.enabled_tracks]
+        if not ctx.user.is_platform_admin:
+            raise Forbidden("Only platform administrators can modify enabled tracks; submit a programme request instead.")
+        org.enabled_tracks = list(dict.fromkeys(t.value for t in req.enabled_tracks))
     if req.is_active is not None:
         if not ctx.user.is_platform_admin:
             raise Forbidden("Only platform administrators can activate or deactivate organisations")
@@ -113,6 +126,49 @@ def update_organization(ctx: AuthContext, org_id: uuid.UUID, req: OrganizationUp
     }
     ctx.audit("organization.update", "organization", org.id, changes=audit.diff(before, after))
     ctx.db.commit()
+    return org
+
+
+def select_primary_programme(
+    ctx: AuthContext, org_id: uuid.UUID, req: PrimaryProgrammeSelectionRequest
+) -> Organization:
+    """Resolve a legacy pending_selection organisation to an explicit primary programme."""
+    if org_id != ctx.org_id and not ctx.user.is_platform_admin:
+        raise Forbidden("Cannot configure another organisation")
+    ctx.require(P.ORG_MANAGE)
+    org = ctx.db.get(Organization, org_id)
+    if org is None:
+        raise NotFound("Organisation not found")
+    if org.programme_configuration_status == "configured" and not ctx.user.is_platform_admin:
+        raise Conflict("Organisation primary programme is already configured; submit a programme request for changes.")
+
+    before = {
+        "primary_programme": org.primary_programme,
+        "programme_configuration_status": org.programme_configuration_status,
+        "enabled_tracks": list(org.enabled_tracks or []),
+    }
+    chosen = req.primary_programme.value
+    org.primary_programme = chosen
+    org.programme_configuration_status = "configured"
+    if req.restrict_to_primary:
+        org.enabled_tracks = [chosen]
+    elif chosen not in (org.enabled_tracks or []):
+        org.enabled_tracks = [*list(org.enabled_tracks or []), chosen]
+
+    after = {
+        "primary_programme": org.primary_programme,
+        "programme_configuration_status": org.programme_configuration_status,
+        "enabled_tracks": list(org.enabled_tracks or []),
+    }
+    ctx.audit(
+        "organization.programme_selected",
+        "organization",
+        org.id,
+        changes=audit.diff(before, after),
+        details={"reason": req.reason, "restrict_to_primary": req.restrict_to_primary},
+    )
+    ctx.db.commit()
+    ctx.db.refresh(org)
     return org
 
 

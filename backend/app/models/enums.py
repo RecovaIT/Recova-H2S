@@ -17,6 +17,13 @@ class ConsentScope(StrEnum):
     FAMILY_NOTIFICATION = "family_notification"  # family / sponsor alerts
     HIE_SHARING = "hie_sharing"                  # FHIR export / Malaffi / Sahatna exchange
     SUPERVISOR_IDENTIFIABLE = "supervisor_identifiable"  # WorkSafe: identifiable data to supervisor
+    OPTIONAL_CHANNELS = "optional_channels"      # optional external notification / public-health channels
+
+
+class NoticeRecipientState(StrEnum):
+    AVAILABLE = "available"
+    READ = "read"
+    ACKNOWLEDGED = "acknowledged"
 
 
 class ConsentStatus(StrEnum):

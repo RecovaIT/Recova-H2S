@@ -25,10 +25,56 @@ import { RecovaMark } from "@/components/RecovaMark";
 import { Button } from "@/components/ui/button";
 import { cn, nowTimestampMs } from "@/lib/utils";
 
+type PortalEnrolment = {
+  enrolment_id: string;
+  patient_id: string;
+  organization_id: string;
+  facility: string;
+  programme: string;
+  track: string;
+  status: string;
+  active: boolean;
+};
+
+type PortalCareDetail = {
+  enrolment_id: string;
+  track: string;
+  released_instructions: Array<{
+    id: string;
+    source: string;
+    instruction?: string | { title?: string; detail?: string };
+    signed_at?: string;
+    decision?: string;
+    notes?: string | null;
+    summary_en?: string | null;
+    summary_ar?: string | null;
+  }>;
+  appointments: Array<{
+    referral_id: string;
+    pathway: string;
+    status: string;
+    priority: string;
+    facility_name?: string | null;
+    appointment_at?: string | null;
+    appointment_reference?: string | null;
+    outcome?: string | null;
+  }>;
+  interventions: Array<{
+    id: string;
+    type: string;
+    status: string;
+    title: string;
+    details?: string | null;
+  }>;
+};
+
 type Portal = {
   name: string;
   track: string;
   facility: string;
+  care_contact?: { name: string; role: string; facility?: string | null };
+  active_enrolment?: PortalEnrolment;
+  enrolments?: PortalEnrolment[];
   synthetic: boolean;
   scenario?: string;
   consents: string[];
@@ -60,6 +106,7 @@ type Portal = {
     id: string;
     title: string;
     body: string;
+    plain_language_action?: string | null;
     issuer: string;
     severity: string;
   }[];
@@ -232,6 +279,8 @@ export default function ParticipantPortal() {
   const { session, loading: authLoading, logout } = useAuth();
   const router = useRouter();
   const [data, setData] = useState<Portal | null>(null);
+  const [careDetail, setCareDetail] = useState<PortalCareDetail | null>(null);
+  const [selectedEnrolmentId, setSelectedEnrolmentId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("home");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -241,12 +290,28 @@ export default function ParticipantPortal() {
   const [craving, setCraving] = useState(2);
   const [reflection, setReflection] = useState("");
   const [crisis, setCrisis] = useState(false);
+  const [shift, setShift] = useState("");
+  const [worksite, setWorksite] = useState("");
+  const [escalationNotice, setEscalationNotice] = useState<{ en: string; ar: string } | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const submissionId = useRef(crypto.randomUUID());
   const [metric, setMetric] = useState("sleep_hours");
   const refresh = useCallback(async () => {
     try {
-      setData(await api.get<Portal>("/portal/me"));
+      const mePath = selectedEnrolmentId
+        ? `/portal/me?enrolment_id=${encodeURIComponent(selectedEnrolmentId)}`
+        : "/portal/me";
+      const me = await api.get<Portal>(mePath);
+      setData(me);
+      const carePath = selectedEnrolmentId
+        ? `/portal/care?enrolment_id=${encodeURIComponent(selectedEnrolmentId)}`
+        : "/portal/care";
+      api
+        .get<PortalCareDetail>(carePath)
+        .then((c) => {
+          if (c && Array.isArray(c.appointments)) setCareDetail(c);
+        })
+        .catch(() => undefined);
       setError("");
     } catch (e) {
       setError(
@@ -255,7 +320,7 @@ export default function ParticipantPortal() {
           : "Your care information could not be loaded.",
       );
     }
-  }, []);
+  }, [selectedEnrolmentId]);
   useEffect(() => {
     if (authLoading) return;
     if (!session) {
@@ -401,6 +466,23 @@ export default function ParticipantPortal() {
             strokeWidth={1.5}
           />
         </div>
+        {data.enrolments && data.enrolments.length > 1 && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#e2edf2] bg-white px-4 py-2.5 text-xs">
+            <span className="font-semibold text-[#003e5e]">Active programme enrolment:</span>
+            <select
+              aria-label="Active enrolment"
+              value={selectedEnrolmentId || data.active_enrolment?.enrolment_id || ""}
+              onChange={(e) => setSelectedEnrolmentId(e.target.value || null)}
+              className="rounded-lg border border-slate-200 bg-[#f8fbfc] px-2.5 py-1.5 text-xs font-medium text-[#011621]"
+            >
+              {data.enrolments.map((enr) => (
+                <option key={enr.enrolment_id} value={enr.enrolment_id}>
+                  {enr.facility} · {enr.programme.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         {data.synthetic && (
           <div className="mb-4 rounded-xl bg-[#e8f1f6] px-3 py-2 text-[11px] text-slate-600">
             Synthetic test account · {data.scenario}
@@ -577,10 +659,10 @@ export default function ParticipantPortal() {
                   </span>
                   <div>
                     <p className="text-sm font-semibold">
-                      Your facility care team
+                      {data.care_contact?.name || "Your facility care team"}
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
-                      Check your next care actions
+                      {data.care_contact?.role || "Check your next care actions"}
                     </p>
                   </div>
                 </div>
@@ -732,9 +814,20 @@ export default function ParticipantPortal() {
             {data.track === "neuro" && (
               <MemoryActivity
                 onSave={async (result) => {
-                  await api.post("/portal/activities", {
-                    ...result,
+                  await api.post("/portal/cognitive-sessions", {
                     request_id: crypto.randomUUID(),
+                    enrolment_id: data.active_enrolment?.enrolment_id,
+                    task_version: "neuro-visual-sequence-v1",
+                    raw_trials: [
+                      {
+                        task_type: "sequence_4key",
+                        modality: "visual",
+                        expected: result.expected,
+                        response: result.response,
+                        reaction_time_ms: Math.max(50, Math.min(60000, result.reaction_time_ms)),
+                        correct: result.correct,
+                      },
+                    ],
                   });
                   await refresh();
                 }}
@@ -746,17 +839,25 @@ export default function ParticipantPortal() {
                 event.preventDefault();
                 void action(
                   async () => {
-                    const response = await api.post<{ emergency: boolean }>(
-                      "/portal/check-ins",
-                      {
-                        mood,
-                        stress,
-                        craving: data.track === "core" ? craving : null,
-                        text: reflection,
-                        crisis,
-                        request_id: submissionId.current,
-                      },
-                    );
+                    const response = await api.post<{
+                      emergency: boolean;
+                      escalation_instructions?: { en: string; ar: string } | null;
+                    }>("/portal/check-ins", {
+                      mood,
+                      stress,
+                      craving: data.track === "core" ? craving : null,
+                      text: reflection,
+                      crisis,
+                      request_id: submissionId.current,
+                      ...(data.active_enrolment?.enrolment_id
+                        ? { enrolment_id: data.active_enrolment.enrolment_id }
+                        : {}),
+                      ...(data.track === "worksafe" && shift.trim() ? { shift: shift.trim() } : {}),
+                      ...(data.track === "worksafe" && worksite.trim() ? { worksite: worksite.trim() } : {}),
+                    });
+                    if (response?.escalation_instructions) {
+                      setEscalationNotice(response.escalation_instructions);
+                    }
                     setSubmitted(true);
                     return response;
                   },
@@ -822,6 +923,38 @@ export default function ParticipantPortal() {
                   </span>
                 </label>
               ))}
+              {data.track === "worksafe" && (
+                <div className="my-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="block text-xs font-medium text-slate-700">
+                    Shift (Optional)
+                    <input
+                      type="text"
+                      value={shift}
+                      onChange={(e) => setShift(e.target.value)}
+                      placeholder="e.g. Morning Shift A"
+                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-[#f8fbfc] px-3 py-2 text-sm font-normal"
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-slate-700">
+                    Worksite (Optional)
+                    <input
+                      type="text"
+                      value={worksite}
+                      onChange={(e) => setWorksite(e.target.value)}
+                      placeholder="e.g. Sector 4 Outdoor"
+                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-[#f8fbfc] px-3 py-2 text-sm font-normal"
+                    />
+                  </label>
+                </div>
+              )}
+              {escalationNotice && (
+                <div role="alert" className="my-4 space-y-2 rounded-xl border border-rose-300 bg-rose-50 p-4 text-xs text-rose-900">
+                  <p className="font-semibold">{escalationNotice.en}</p>
+                  <p dir="rtl" className="text-right font-sans font-medium">
+                    {escalationNotice.ar}
+                  </p>
+                </div>
+              )}
               <label className="block text-sm font-medium">
                 {programme.prompt}
                 <textarea
@@ -1006,7 +1139,34 @@ export default function ParticipantPortal() {
                 next steps together.
               </p>
             </section>
-            {data.care.map((item) => (
+            {careDetail?.released_instructions.map((item) => (
+              <section className="patient-panel" key={item.id}>
+                <span className="rounded-full bg-[#edf4f7] px-3 py-1 text-[10px] text-[#003e5e]">
+                  {item.decision ? item.decision.replaceAll("_", " ") : item.source.replaceAll("_", " ")}
+                </span>
+                {item.notes && <p className="mt-3 text-sm font-medium">{item.notes}</p>}
+                {item.summary_en && <p className="patient-muted mt-2">{item.summary_en}</p>}
+                {item.summary_ar && (
+                  <p dir="rtl" className="mt-2 text-right font-sans text-xs text-slate-600">
+                    {item.summary_ar}
+                  </p>
+                )}
+              </section>
+            ))}
+            {careDetail?.appointments.map((appt) => (
+              <section className="patient-panel" key={appt.referral_id}>
+                <span className="rounded-full bg-[#e4f3dd] px-3 py-1 text-[10px] font-semibold text-[#214e40]">
+                  {appt.status.replaceAll("_", " ")}
+                </span>
+                <h2 className="mt-3">{appt.pathway.replaceAll("_", " ")}</h2>
+                <p className="patient-muted">
+                  {appt.facility_name || "Assigned facility"}
+                  {appt.appointment_at ? ` · ${new Date(appt.appointment_at).toLocaleString()}` : ""}
+                  {appt.outcome ? ` · Outcome: ${appt.outcome}` : ""}
+                </p>
+              </section>
+            ))}
+            {!careDetail && data.care.map((item) => (
               <section className="patient-panel" key={item.id}>
                 <span className="rounded-full bg-[#edf4f7] px-3 py-1 text-[10px] text-[#003e5e]">
                   {item.status}
@@ -1020,7 +1180,7 @@ export default function ParticipantPortal() {
                 )}
               </section>
             ))}
-            {data.referrals.map((item) => (
+            {!careDetail && data.referrals.map((item) => (
               <section className="patient-panel" key={item.id}>
                 <h2>{item.pathway.replaceAll("_", " ")}</h2>
                 <p className="patient-muted">
@@ -1028,7 +1188,7 @@ export default function ParticipantPortal() {
                 </p>
               </section>
             ))}
-            {!data.care.length && !data.referrals.length && (
+            {!(careDetail?.released_instructions.length || careDetail?.appointments.length || data.care.length || data.referrals.length) && (
               <section className="patient-panel">
                 <p className="patient-muted">
                   Your team will share your next care steps here.
@@ -1088,6 +1248,12 @@ export default function ParticipantPortal() {
                   title: "Health information exchange",
                   detail:
                     "Allow approved health-information sharing integrations.",
+                },
+                {
+                  scope: "optional_channels",
+                  title: "Optional external channels",
+                  detail:
+                    "Allow optional SMS or email updates when configured by your facility.",
                 },
               ].map((item) => (
                 <label key={item.scope} className="patient-history">

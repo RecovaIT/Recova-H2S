@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { opsService } from "@/services/ops";
 import type {
   AuditEvent,
+  AuthorityScope,
   JobRecord,
   Organization,
   RolePermissionView,
@@ -51,7 +52,12 @@ function AdminPageContent() {
   const [permCatalog, setPermCatalog] = useState<string[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditEvent[]>([]);
   const [jobs, setJobs] = useState<JobRecord[]>([]);
+  const [authorityScopes, setAuthorityScopes] = useState<AuthorityScope[]>([]);
   const [busy, setBusy] = useState(false);
+
+  // Authority scope form
+  const [scopeUserId, setScopeUserId] = useState("");
+  const [scopeEmirates, setScopeEmirates] = useState("Abu Dhabi");
 
   // New user form
   const [uEmail, setUEmail] = useState("");
@@ -70,6 +76,7 @@ function AdminPageContent() {
   const [orgName, setOrgName] = useState("");
   const [orgSlug, setOrgSlug] = useState("");
   const [orgType, setOrgType] = useState("hospital");
+  const [orgPrimaryProgramme, setOrgPrimaryProgramme] = useState<Track>("core");
 
   const loadAdmin = useCallback(async () => {
     const [uList, oList, rList, catRes] = await Promise.all([
@@ -82,6 +89,9 @@ function AdminPageContent() {
     setOrgs(oList);
     setRoles(rList);
     setPermCatalog(catRes.permissions);
+    if (session?.user?.is_platform_admin) {
+      opsService.listAuthorityScopes().then(setAuthorityScopes).catch(() => setAuthorityScopes([]));
+    }
     if (hasPermission("audit:read")) {
       const [aPage, jPage] = await Promise.all([
         opsService.listAuditLogs({ page: 1, page_size: 40 }),
@@ -90,7 +100,7 @@ function AdminPageContent() {
       setAuditLogs(aPage.items);
       setJobs(jPage.items);
     }
-  }, [hasPermission]);
+  }, [hasPermission, session?.user?.is_platform_admin]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -165,7 +175,8 @@ function AdminPageContent() {
         name: orgName.trim(),
         slug: derivedSlug,
         org_type: orgType,
-        enabled_tracks: ["core", "loop", "neuro", "worksafe"] as Track[],
+        primary_programme: orgPrimaryProgramme,
+        enabled_tracks: [orgPrimaryProgramme],
       });
       setOrgName("");
       setOrgSlug("");
@@ -238,6 +249,7 @@ function AdminPageContent() {
                         <option value="screening_coordinator">Screening Coordinator</option>
                         <option value="occ_health_director">Occ Health Director</option>
                         <option value="supervisor">Supervisor</option>
+                        <option value="authority_user">Authority User</option>
                         <option value="org_admin">Org Admin</option>
                       </Select>
                     </div>
@@ -389,16 +401,87 @@ function AdminPageContent() {
                 </CardHeader>
                 <CardContent>
                   <form onSubmit={handleCreateOrg} className="flex flex-wrap items-end gap-3">
-                    <Input required value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="Organisation Name" className="w-64" />
-                    <Input pattern="[a-z0-9-]*" value={orgSlug} onChange={(e) => setOrgSlug(e.target.value)} placeholder="slug (optional)" className="w-44" />
-                    <Select value={orgType} onChange={(e) => setOrgType(e.target.value)} className="w-40">
+                    <Input required value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="Organisation Name" className="w-60" />
+                    <Input pattern="[a-z0-9-]*" value={orgSlug} onChange={(e) => setOrgSlug(e.target.value)} placeholder="slug (optional)" className="w-40" />
+                    <Select value={orgType} onChange={(e) => setOrgType(e.target.value)} className="w-36">
                       <option value="hospital">Hospital</option>
                       <option value="clinic">Clinic</option>
                       <option value="employer">Employer</option>
                       <option value="rehab_center">Rehab Center</option>
+                      <option value="public_health">Public Health</option>
+                    </Select>
+                    <Select value={orgPrimaryProgramme} onChange={(e) => setOrgPrimaryProgramme(e.target.value as Track)} className="w-36">
+                      <option value="core">Core</option>
+                      <option value="loop">Loop</option>
+                      <option value="neuro">Neuro</option>
+                      <option value="worksafe">WorkSafe</option>
                     </Select>
                     <Button type="submit" disabled={busy}>Provision Org</Button>
                   </form>
+                </CardContent>
+              </Card>
+            )}
+
+            {hasPermission("platform:admin") && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Assign Authority Scope</CardTitle>
+                  <CardDescription>Grant geographic/facility notice publishing &amp; k-suppressed reporting scope.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!scopeUserId) return;
+                      setBusy(true);
+                      try {
+                        await opsService.createAuthorityScope({
+                          user_id: scopeUserId,
+                          assigned_emirates: scopeEmirates.split(",").map((s) => s.trim()).filter(Boolean),
+                          can_publish: true,
+                          can_view_reports: true,
+                          min_suppression_k: 5,
+                        });
+                        pushToast("Authority scope assigned", "success");
+                        await loadAdmin();
+                      } catch (err) {
+                        pushToast("Failed to assign scope", "error", err instanceof Error ? err.message : undefined);
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                    className="flex flex-wrap items-end gap-3"
+                  >
+                    <div className="w-64 space-y-1">
+                      <Label>User</Label>
+                      <Select value={scopeUserId} onChange={(e) => setScopeUserId(e.target.value)} required>
+                        <option value="">Select user...</option>
+                        {users.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.full_name} ({u.email})
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className="w-60 space-y-1">
+                      <Label>Assigned Emirates (comma-separated)</Label>
+                      <Input value={scopeEmirates} onChange={(e) => setScopeEmirates(e.target.value)} placeholder="Abu Dhabi, Dubai" />
+                    </div>
+                    <Button type="submit" disabled={busy}>Assign Scope</Button>
+                  </form>
+                  {authorityScopes.length > 0 && (
+                    <div className="space-y-1.5 text-xs">
+                      {authorityScopes.map((sc) => (
+                        <div key={sc.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                          <span>
+                            User <code className="font-mono">{sc.user_id.slice(0, 8)}</code> · Emirates:{" "}
+                            <strong>{sc.assigned_emirates.join(", ") || "All"}</strong> · k≥{sc.min_suppression_k}
+                          </span>
+                          <Badge variant={sc.is_active ? "outline" : "secondary"}>{sc.is_active ? "Active" : "Revoked"}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -424,7 +507,12 @@ function AdminPageContent() {
                           <TableCell className="text-xs font-semibold">{o.name}</TableCell>
                           <TableCell className="font-mono text-xs">{o.slug}</TableCell>
                           <TableCell className="text-xs">{formatLabel(o.org_type)}</TableCell>
-                          <TableCell className="text-xs uppercase">{o.enabled_tracks.join(", ")}</TableCell>
+                          <TableCell className="text-xs uppercase">
+                            {o.primary_programme || o.enabled_tracks.join(", ")}
+                            {o.programme_configuration_status === "pending_selection" && (
+                              <Badge variant="outline" className="ml-1.5 text-[10px]">Pending</Badge>
+                            )}
+                          </TableCell>
                           <TableCell className="text-right">
                             {isActive ? (
                               <Badge variant="outline">Active</Badge>

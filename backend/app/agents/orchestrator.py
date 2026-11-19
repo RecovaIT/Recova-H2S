@@ -151,7 +151,9 @@ def execute_pipeline_run(db: Session, run_id: uuid.UUID) -> PipelineRun:
     # ---------------- GATE 1: Consent, Governance & Guardrail ----------------
     start_step("gate1_consent")
     t0 = time.perf_counter()
-    g1_in, g1_out = run_gate1(db, patient, run.track, run.as_of)
+    # Evaluate consent at execution time so revocations occurring while queued take effect immediately.
+    consent_as_of = max(run.as_of, utcnow())
+    g1_in, g1_out = run_gate1(db, patient, run.track, consent_as_of)
     g1_ms = int((time.perf_counter() - t0) * 1000)
 
     if not g1_out.allow_routine_processing:

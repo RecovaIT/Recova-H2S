@@ -19,6 +19,7 @@ class Role(StrEnum):
     SCREENING_COORDINATOR = "screening_coordinator"
     OCC_HEALTH_DIRECTOR = "occ_health_director"
     SUPERVISOR = "supervisor"
+    AUTHORITY_USER = "authority_user"
     PATIENT = "patient"
 
 
@@ -67,6 +68,8 @@ class P(StrEnum):
     SETTINGS_READ = "settings:read"
     SETTINGS_MANAGE = "settings:manage"
     REPORTS_READ = "reports:read"
+    AUTHORITY_PUBLISH = "authority:publish"
+    AUTHORITY_REPORTS = "authority:reports"
     PORTAL_SELF = "portal:self"
     PLATFORM_ADMIN = "platform:admin"
 
@@ -83,7 +86,7 @@ _CLINICAL_BASE = {
 
 DEFAULT_ROLE_PERMISSIONS: dict[Role, frozenset[str]] = {
     Role.PLATFORM_ADMIN: ALL_PERMISSIONS,
-    Role.ORG_ADMIN: frozenset(ALL_PERMISSIONS - {P.PLATFORM_ADMIN, P.PORTAL_SELF}),
+    Role.ORG_ADMIN: frozenset(ALL_PERMISSIONS - {P.PLATFORM_ADMIN, P.PORTAL_SELF, P.AUTHORITY_PUBLISH, P.AUTHORITY_REPORTS}),
     Role.CLINICIAN: frozenset(_CLINICAL_BASE | {P.REVIEWS_SIGN, P.OUTCOMES_VERIFY, P.COGNITIVE_ADMINISTER, P.BENCHMARKS_RUN}),
     Role.PSYCHIATRIST: frozenset(_CLINICAL_BASE | {P.REVIEWS_SIGN, P.OUTCOMES_VERIFY, P.COGNITIVE_ADMINISTER}),
     Role.CARE_COORDINATOR: frozenset(_CLINICAL_BASE),
@@ -100,6 +103,10 @@ DEFAULT_ROLE_PERMISSIONS: dict[Role, frozenset[str]] = {
     Role.SUPERVISOR: frozenset({
         P.ORG_READ, P.WORKFORCE_AGGREGATE, P.INTERVENTIONS_READ, P.INTERVENTIONS_WRITE, P.REPORTS_READ,
     }),
+    # Authority users coordinate scoped public-health notices & aggregate reporting only.
+    Role.AUTHORITY_USER: frozenset({
+        P.ORG_READ, P.AUTHORITY_PUBLISH, P.AUTHORITY_REPORTS, P.REPORTS_READ,
+    }),
     Role.PATIENT: frozenset({P.PORTAL_SELF}),
 }
 
@@ -112,6 +119,7 @@ DEFAULT_ROLE_TRACKS: dict[Role, frozenset[Track]] = {
     Role.SCREENING_COORDINATOR: frozenset({Track.LOOP}),
     Role.OCC_HEALTH_DIRECTOR: frozenset({Track.WORKSAFE}),
     Role.SUPERVISOR: frozenset({Track.WORKSAFE}),
+    Role.AUTHORITY_USER: frozenset(),
     Role.PATIENT: frozenset(),
 }
 

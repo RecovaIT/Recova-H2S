@@ -102,10 +102,13 @@ export default function PatientsPage() {
                   }}
                 >
                   <option value="">All Tracks</option>
-                  <option value="core">Core</option>
-                  <option value="loop">Loop</option>
-                  <option value="neuro">Neuro</option>
-                  <option value="worksafe">WorkSafe</option>
+                  {(["core", "loop", "neuro", "worksafe"] as const)
+                    .filter((t) => hasTrack(t))
+                    .map((t) => (
+                      <option key={t} value={t}>
+                        {t.charAt(0).toUpperCase() + t.slice(1)}
+                      </option>
+                    ))}
                 </Select>
               </div>
               <div className="w-44">

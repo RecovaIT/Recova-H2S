@@ -22,6 +22,7 @@ from app.schemas.identity import (
     OrganizationCreate,
     OrganizationOut,
     OrganizationUpdate,
+    PrimaryProgrammeSelectionRequest,
     ProgrammeRequestCreate,
     ProgrammeRequestOut,
     ProgrammeRequestReview,
@@ -52,6 +53,15 @@ def create_organization(req: OrganizationCreate, ctx: AuthContext = Depends(get_
 @orgs_router.patch("/{organization_id}", response_model=OrganizationOut)
 def update_organization(organization_id: uuid.UUID, req: OrganizationUpdate, ctx: AuthContext = Depends(get_auth_context)):
     return org_svc.update_organization(ctx, organization_id, req)
+
+
+@orgs_router.post("/{organization_id}/select-primary-programme", response_model=OrganizationOut)
+def select_primary_programme(
+    organization_id: uuid.UUID,
+    req: PrimaryProgrammeSelectionRequest,
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    return org_svc.select_primary_programme(ctx, organization_id, req)
 
 
 @orgs_router.get("/permissions/catalog")

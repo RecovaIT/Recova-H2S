@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { FileCode2, MailPlus, Play, RotateCcw, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { api } from "@/lib/api";
 import { engineService } from "@/services/engine";
 import { patientsService } from "@/services/patients";
 import { signalsService } from "@/services/signals";
@@ -41,6 +40,7 @@ const CONSENT_SCOPES: ConsentScope[] = [
   "family_notification",
   "hie_sharing",
   "supervisor_identifiable",
+  "optional_channels",
 ];
 
 export default function PatientDetailPage() {
@@ -194,10 +194,13 @@ export default function PatientDetailPage() {
     }
     setBusy(true);
     try {
-      const res = await api.post<{ invitation_token: string; expires_at: string }>(
-        `/patients/${patientId}/portal-invitations?recipient_email=${encodeURIComponent(email)}`
+      const res = await patientsService.issuePortalInvitation(patientId, email.trim());
+      const invitePath = `/accept-invitation?token=${encodeURIComponent(res.invitation_token)}`;
+      pushToast(
+        `Portal invitation issued for ${res.organization_name || "facility"} (72h expiry)`,
+        "success",
+        `Link: ${invitePath}`
       );
-      pushToast("Portal invitation issued (72h expiry)", "success", `Token: ${res.invitation_token.slice(0, 12)}…`);
     } catch (err) {
       pushToast("Could not issue invitation", "error", err instanceof Error ? err.message : undefined);
     } finally {

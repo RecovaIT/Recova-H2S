@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
+from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 
 from app.api.deps import AuthContext, requires, requires_track
@@ -88,17 +89,27 @@ def enroll_patient(patient_id: uuid.UUID, req: EnrollmentCreate, ctx: AuthContex
     return pat_svc.enroll_track(ctx, patient_id, req)
 
 
+class PortalInvitationCreate(BaseModel):
+    recipient_email: EmailStr
+
+
 @patients_router.post("/{patient_id}/portal-invitations", status_code=201)
 def create_portal_invitation(
     patient_id: uuid.UUID,
-    recipient_email: str = Query(..., min_length=5, max_length=320),
+    recipient_email: EmailStr | None = Query(default=None),
+    body: PortalInvitationCreate | None = Body(default=None),
     ctx: AuthContext = Depends(requires(P.PATIENTS_WRITE)),
 ):
     """Issue a single-use, expiring, recipient-bound portal invitation (stored as token hash)."""
     from datetime import timedelta
+    from app.core.errors import ValidationFailed
     from app.core.security import hash_token, new_token
     from app.models.base import utcnow
     from app.models.identity import PortalInvitation
+
+    email_val = (str(body.recipient_email) if body is not None else (str(recipient_email) if recipient_email else "")).strip().lower()
+    if not email_val:
+        raise ValidationFailed("recipient_email is required")
 
     detail = pat_svc.get_patient(ctx, patient_id)
     now = utcnow()
@@ -119,7 +130,7 @@ def create_portal_invitation(
     inv = PortalInvitation(
         organization_id=ctx.org_id,
         patient_id=detail.id,
-        recipient_email=recipient_email.strip().lower(),
+        recipient_email=email_val,
         token_hash=hash_token(raw_token),
         purpose="portal_link",
         expires_at=expires_at,
@@ -127,12 +138,17 @@ def create_portal_invitation(
     )
     ctx.db.add(inv)
     ctx.db.flush()
-    ctx.audit("patient.portal_invitation.issue", "portal_invitation", inv.id, details={"patient_id": str(detail.id)})
+    ctx.audit("patient.portal_invitation.issue", "portal_invitation", inv.id, patient_id=detail.id, details={"patient_id": str(detail.id)})
     ctx.db.commit()
+    primary_prog = ctx.organization.primary_programme if ctx.organization else None
     return {
         "invitation_id": str(inv.id),
         "patient_id": str(detail.id),
+        "organization_id": str(ctx.org_id),
+        "organization_name": ctx.organization.name if ctx.organization else None,
+        "primary_programme": primary_prog,
         "recipient_email": inv.recipient_email,
+        "purpose": inv.purpose,
         "expires_at": inv.expires_at,
         "invitation_token": raw_token,
     }

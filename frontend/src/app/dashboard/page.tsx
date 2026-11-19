@@ -118,7 +118,7 @@ const RISK_SERIES = [
 ];
 
 export default function DashboardPage() {
-  const { session, hasPermission, hasTrack } = useAuth();
+  const { session, hasPermission, hasTrack, refreshSession } = useAuth();
   const reduceMotion = useReducedMotion();
   const [overview, setOverview] = useState<OverviewReport | null>(null);
   const [platformOverview, setPlatformOverview] = useState<PlatformOverviewReport | null>(null);
@@ -126,6 +126,8 @@ export default function DashboardPage() {
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [legacyProgramme, setLegacyProgramme] = useState<Track>("core");
+  const [selectingLegacy, setSelectingLegacy] = useState(false);
 
   const isPlatformAdmin = Boolean(session?.user?.is_platform_admin);
 
@@ -278,6 +280,55 @@ export default function DashboardPage() {
         }
       >
         <div className="care-dashboard space-y-6">
+          {session?.programme_configuration_status === "pending_selection" &&
+            session.active_organization &&
+            hasPermission("org:manage") && (
+              <Card className="border-amber-200 bg-amber-50/70">
+                <CardContent className="flex flex-wrap items-center justify-between gap-4 pt-5">
+                  <div>
+                    <p className="text-sm font-semibold text-amber-950">
+                      Legacy Multi-Programme Configuration Awaiting Selection
+                    </p>
+                    <p className="mt-1 text-xs text-amber-900">
+                      Select your facility&apos;s primary Recova programme to complete unified platform configuration while preserving historical records.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      aria-label="Primary programme selection"
+                      value={legacyProgramme}
+                      onChange={(e) => setLegacyProgramme(e.target.value as Track)}
+                      className="h-9 rounded-lg border border-amber-300 bg-white px-3 text-xs font-medium text-slate-900"
+                    >
+                      {TRACKS.map((t) => (
+                        <option key={t.key} value={t.key}>
+                          {t.title}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      size="sm"
+                      disabled={selectingLegacy}
+                      onClick={async () => {
+                        if (!session.active_organization) return;
+                        setSelectingLegacy(true);
+                        try {
+                          await opsService.selectPrimaryProgramme(session.active_organization.id, {
+                            primary_programme: legacyProgramme,
+                            reason: "Administrator confirmed primary facility programme",
+                          });
+                          await refreshSession();
+                        } finally {
+                          setSelectingLegacy(false);
+                        }
+                      }}
+                    >
+                      {selectingLegacy ? "Saving..." : "Confirm Primary Programme"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           {error && (
             <div
               role="alert"

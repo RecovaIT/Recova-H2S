@@ -89,6 +89,18 @@ class Settings(BaseSettings):
     # missing (vital-interest exception). Routine analysis remains blocked.
     emergency_screen_without_consent: bool = True
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalize_database_url(cls, v):  # type: ignore[no-untyped-def]
+        if isinstance(v, str):
+            val = v.strip()
+            if val.startswith("postgres://"):
+                return "postgresql+psycopg://" + val[len("postgres://"):]
+            if val.startswith("postgresql://"):
+                return "postgresql+psycopg://" + val[len("postgresql://"):]
+            return val
+        return v
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, v):  # type: ignore[no-untyped-def]

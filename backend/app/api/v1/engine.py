@@ -98,6 +98,7 @@ def list_scoring_results(
 ):
     stmt = select(ScoringResult).where(ScoringResult.organization_id == ctx.org_id, ScoringResult.patient_id == patient_id)
     if track:
+        ctx.require_track(track)
         stmt = stmt.where(ScoringResult.track == track)
     return list(ctx.db.scalars(stmt.order_by(ScoringResult.computed_at.desc()).limit(50)).all())
 
@@ -133,6 +134,7 @@ def list_pipeline_runs(
     if patient_id:
         stmt = stmt.where(PipelineRun.patient_id == patient_id)
     if track:
+        ctx.require_track(track)
         stmt = stmt.where(PipelineRun.track == track)
     if status:
         stmt = stmt.where(PipelineRun.status == status)

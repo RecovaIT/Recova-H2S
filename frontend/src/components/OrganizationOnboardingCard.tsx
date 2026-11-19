@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -113,6 +113,8 @@ export function OrganizationOnboardingCard({ mode }: { mode: "bootstrap" | "regi
 
   const [serviceContact, setServiceContact] = useState("");
   const [participationAccepted, setParticipationAccepted] = useState(true);
+  const [externalSynthesisOptIn, setExternalSynthesisOptIn] = useState(false);
+  const idempotencyKeyRef = useRef<string | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -171,12 +173,36 @@ export function OrganizationOnboardingCard({ mode }: { mode: "bootstrap" | "regi
       cleanSlug = sanitized.length >= 2 ? sanitized.slice(0, 80) : `org-${Date.now().toString(36)}`;
     }
 
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `onb-${Date.now().toString(36)}`;
+    }
+
     const payload: BootstrapPayload = {
       organization_name: orgName.trim(),
       organization_slug: cleanSlug,
       org_type: orgType,
       primary_programme: primaryProgramme,
       enabled_tracks: isBootstrap ? ["core", "loop", "neuro", "worksafe"] : [primaryProgramme],
+      country: "UAE",
+      emirate: emirate.trim() || "Abu Dhabi",
+      idempotency_key: idempotencyKeyRef.current,
+      service_setup: {
+        primary_programme: primaryProgramme,
+        facility_contact: serviceContact.trim() || undefined,
+      },
+      responsible_contact: serviceContact.trim()
+        ? { email: serviceContact.trim(), name: fullName.trim() }
+        : { email: email.trim().toLowerCase(), name: fullName.trim() },
+      permitted_channels: ["in_app"],
+      participation_consent: {
+        policy_version: "v1.0",
+        accepted_public_health_coordination: participationAccepted,
+        external_synthesis_opt_in: externalSynthesisOptIn,
+        external_channels: [],
+      },
       admin_full_name: fullName.trim(),
       admin_license_number: license.trim() || undefined,
       admin_email: email.trim().toLowerCase(),
@@ -462,6 +488,15 @@ export function OrganizationOnboardingCard({ mode }: { mode: "bootstrap" | "regi
                       className="rounded border-[#c4d7e2] text-[#003e5e]"
                     />
                     I confirm the shared population-health notice &amp; consent policy (v1.0)
+                  </label>
+                  <label className="mt-2.5 flex cursor-pointer items-center gap-2 text-xs font-medium text-[#011621]">
+                    <input
+                      type="checkbox"
+                      checked={externalSynthesisOptIn}
+                      onChange={(e) => setExternalSynthesisOptIn(e.target.checked)}
+                      className="rounded border-[#c4d7e2] text-[#003e5e]"
+                    />
+                    Enable de-identified external AI synthesis governance policy when configured (optional)
                   </label>
                 </div>
               </div>

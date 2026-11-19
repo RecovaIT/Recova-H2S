@@ -7,6 +7,13 @@ export interface BootstrapPayload {
   org_type: "clinic" | "rehab_center" | "public_health" | "employer" | "hospital";
   primary_programme?: string;
   enabled_tracks: string[];
+  country?: string;
+  emirate?: string;
+  idempotency_key?: string;
+  service_setup?: Record<string, unknown>;
+  responsible_contact?: Record<string, unknown>;
+  permitted_channels?: string[];
+  participation_consent?: Record<string, unknown>;
   admin_email: string;
   admin_full_name: string;
   admin_password: string;
@@ -77,5 +84,9 @@ export const authService = {
 
   async changePassword(current_password: string, new_password: string): Promise<{ message: string }> {
     return api.post("/auth/change-password", { current_password, new_password });
+  },
+
+  async acceptPortalInvitation(token: string): Promise<{ message: string }> {
+    return api.post("/auth/accept-portal-invitation", { token });
   },
 };

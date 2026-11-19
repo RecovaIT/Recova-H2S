@@ -6,13 +6,14 @@ import uuid
 from datetime import timedelta
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, resolve_permissions
 from app.core import audit
 from app.core.config import get_settings
 from app.core.errors import Conflict, Forbidden, NotFound, Unauthorized, ValidationFailed
-from app.core.permissions import Role
+from app.core.permissions import P, Role
 from app.core.rate_limit import limiter
 from app.core.security import (
     hash_password,
@@ -22,8 +23,56 @@ from app.core.security import (
     verify_password,
 )
 from app.models.base import utcnow
-from app.models.identity import Membership, Organization, PasswordResetToken, User, UserSession
+from app.models.clinical import Patient, TrackEnrollment
+from app.models.identity import (
+    AuthorityScope,
+    Membership,
+    Organization,
+    ParticipantAccountLink,
+    PasswordResetToken,
+    User,
+    UserSession,
+)
 from app.schemas.identity import BootstrapRequest, MembershipOut, OrganizationOut, SessionResponse, UserOut
+
+
+def _participant_enrolments_for_user(db: Session, user: User) -> list[dict]:
+    links = db.scalars(
+        select(ParticipantAccountLink).where(
+            ParticipantAccountLink.user_id == user.id,
+            ParticipantAccountLink.revoked_at.is_(None),
+        )
+    ).all()
+    patient_ids = [lnk.patient_id for lnk in links]
+    fallback_patients = db.scalars(
+        select(Patient).where(Patient.portal_user_id == user.id, Patient.is_active.is_(True))
+    ).all()
+    for p in fallback_patients:
+        if p.id not in patient_ids:
+            patient_ids.append(p.id)
+    if not patient_ids:
+        return []
+    enrollments = db.scalars(
+        select(TrackEnrollment).where(
+            TrackEnrollment.patient_id.in_(patient_ids),
+            TrackEnrollment.status == "active",
+        )
+    ).all()
+    org_ids = list({e.organization_id for e in enrollments})
+    orgs = {o.id: o for o in db.scalars(select(Organization).where(Organization.id.in_(org_ids))).all()} if org_ids else {}
+    return [
+        {
+            "enrolment_id": str(e.id),
+            "patient_id": str(e.patient_id),
+            "organization_id": str(e.organization_id),
+            "organization_name": orgs[e.organization_id].name if e.organization_id in orgs else None,
+            "programme": e.track,
+            "track": e.track,
+            "status": e.status,
+        }
+        for e in enrollments
+        if e.organization_id in orgs and orgs[e.organization_id].is_active
+    ]
 
 
 def _session_payload(db: Session, user: User, sess: UserSession, raw_csrf: str | None = None) -> SessionResponse:
@@ -51,6 +100,32 @@ def _session_payload(db: Session, user: User, sess: UserSession, raw_csrf: str |
         active_role = Role.PLATFORM_ADMIN
 
     perms, tracks = resolve_permissions(db, active_org, active_role, user.is_platform_admin)
+    participant_enrolments = _participant_enrolments_for_user(db, user)
+    active_enrolment = (
+        next((e for e in participant_enrolments if active_org and e["organization_id"] == str(active_org.id)), None)
+        or (participant_enrolments[0] if participant_enrolments else None)
+    )
+    has_auth_scope = bool(
+        db.scalar(
+            select(AuthorityScope.id).where(AuthorityScope.user_id == user.id, AuthorityScope.is_active.is_(True))
+        )
+    )
+    org_settings = (active_org.settings or {}) if active_org else {}
+    primary_prog = (
+        active_org.primary_programme
+        or (active_org.enabled_tracks[0] if active_org and active_org.enabled_tracks else None)
+    ) if active_org else None
+    prog_status = active_org.programme_configuration_status if active_org else None
+    capability_flags = {
+        "shared_population_health": bool(org_settings.get("shared_population_health_provisioned", True)) if active_org else False,
+        "external_synthesis_opt_in": bool((org_settings.get("participation_consent") or {}).get("external_synthesis_opt_in", False)),
+        "authority_publish": bool(user.is_platform_admin or (P.AUTHORITY_PUBLISH in perms and has_auth_scope)),
+        "authority_reports": bool(user.is_platform_admin or (P.AUTHORITY_REPORTS in perms and has_auth_scope)),
+        "requires_programme_selection": prog_status == "pending_selection",
+        "participant_portal": bool(participant_enrolments),
+        "multi_capacity": bool(participant_enrolments and any(m.role != Role.PATIENT.value for m in memberships)),
+    }
+
     m_out = [
         MembershipOut(
             id=m.id,
@@ -69,8 +144,13 @@ def _session_payload(db: Session, user: User, sess: UserSession, raw_csrf: str |
         user=UserOut.model_validate(user),
         active_organization=OrganizationOut.model_validate(active_org) if active_org else None,
         role=active_role.value if active_role else None,
+        primary_programme=primary_prog,
+        programme_configuration_status=prog_status,
         permissions=sorted(perms),
         tracks=sorted(tracks),
+        capability_flags=capability_flags,
+        active_enrolment=active_enrolment,
+        participant_enrolments=participant_enrolments,
         memberships=m_out,
         csrf_token=raw_csrf,
     )
@@ -95,27 +175,54 @@ def _create_org_and_admin_session(
         raise ValidationFailed("; ".join(problems))
 
     if enforce_single_programme:
+        distinct_tracks = list(dict.fromkeys(t.value for t in req.enabled_tracks))
         if req.primary_programme is not None:
+            if any(t != req.primary_programme.value for t in distinct_tracks):
+                raise ValidationFailed("Select exactly one primary programme during organisation registration.")
             resolved_tracks = [req.primary_programme.value]
             primary_prog = req.primary_programme.value
-        elif len(req.enabled_tracks) == 1:
-            resolved_tracks = [req.enabled_tracks[0].value]
-            primary_prog = req.enabled_tracks[0].value
+        elif len(distinct_tracks) == 1:
+            resolved_tracks = distinct_tracks
+            primary_prog = distinct_tracks[0]
         else:
             raise ValidationFailed("Select exactly one primary programme during organisation registration.")
     else:
         if not req.enabled_tracks:
             raise ValidationFailed("Select at least one application track")
-        resolved_tracks = [t.value for t in req.enabled_tracks]
+        resolved_tracks = list(dict.fromkeys(t.value for t in req.enabled_tracks))
         primary_prog = req.primary_programme.value if req.primary_programme else resolved_tracks[0]
 
     slug = req.organization_slug.strip().lower()
     email = req.admin_email.strip().lower()
+    idem_key = req.idempotency_key.strip() if req.idempotency_key else None
 
+    if idem_key and db.scalar(select(Organization).where(Organization.idempotency_key == idem_key)) is not None:
+        raise Conflict("Duplicate organisation registration submission rejected")
     if db.scalar(select(Organization).where(Organization.slug == slug)) is not None:
         raise Conflict(f"Organisation slug '{slug}' already exists")
     if db.scalar(select(User).where(User.email == email)) is not None:
         raise Conflict(f"An account with email '{email}' already exists. Sign in or use another admin email.")
+
+    now = utcnow()
+    participation_consent = dict(req.participation_consent or {})
+    policy_version = str(participation_consent.get("policy_version") or "v1.0")
+    ext_synthesis_opt_in = bool(participation_consent.get("external_synthesis_opt_in", False))
+    accepted_public_health = bool(participation_consent.get("accepted_public_health_coordination", True))
+
+    org_settings = {
+        "shared_population_health_provisioned": True,
+        "service_setup": dict(req.service_setup or {}),
+        "responsible_contact": dict(req.responsible_contact or {}),
+        "permitted_channels": list(dict.fromkeys(req.permitted_channels or ["in_app"])),
+        "participation_consent": {
+            "policy_version": policy_version,
+            "accepted_public_health_coordination": accepted_public_health,
+            "external_synthesis_opt_in": ext_synthesis_opt_in,
+            "external_channels": list(participation_consent.get("external_channels") or []),
+            "recorded_by_email": email,
+            "recorded_at": now.isoformat(),
+        },
+    }
 
     org = Organization(
         name=req.organization_name.strip(),
@@ -124,9 +231,11 @@ def _create_org_and_admin_session(
         primary_programme=primary_prog,
         programme_configuration_status="configured",
         enabled_tracks=resolved_tracks,
-        country="UAE",
-        emirate="Abu Dhabi",
+        country=(req.country or "UAE").strip(),
+        emirate=(req.emirate or "Abu Dhabi").strip(),
+        settings=org_settings,
         data_retention_days=2555,
+        idempotency_key=idem_key,
     )
     db.add(org)
     db.flush()
@@ -139,7 +248,7 @@ def _create_org_and_admin_session(
         is_platform_admin=is_platform_admin,
         preferred_language="en",
         license_number=req.admin_license_number,
-        last_login_at=utcnow(),
+        last_login_at=now,
     )
     db.add(user)
     db.flush()
@@ -162,10 +271,21 @@ def _create_org_and_admin_session(
         organization_id=org.id,
         actor_user_id=user.id,
         actor_label=user.email,
-        details={"slug": org.slug, "enabled_tracks": org.enabled_tracks},
+        details={
+            "slug": org.slug,
+            "primary_programme": primary_prog,
+            "enabled_tracks": org.enabled_tracks,
+            "policy_version": policy_version,
+            "external_synthesis_opt_in": ext_synthesis_opt_in,
+            "permitted_channels": org_settings["permitted_channels"],
+        },
         ip_address=ip_address,
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise Conflict("Organisation or administrator account already exists") from exc
     return _session_payload(db, user, sess, raw_csrf=raw_csrf), raw_session, raw_csrf
 
 

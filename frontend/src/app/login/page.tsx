@@ -25,7 +25,13 @@ export default function LoginPage() {
     if (needsBootstrap) {
       router.replace("/bootstrap");
     } else if (session) {
-      router.replace(session?.role === "patient" ? "/portal" : "/dashboard");
+      if (session.role === "patient") {
+        router.replace("/portal");
+      } else if (session.role === "authority_user") {
+        router.replace("/authority");
+      } else {
+        router.replace("/dashboard");
+      }
     }
   }, [loading, needsBootstrap, session, router]);
 
@@ -35,7 +41,13 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const result = await login({ email: email.trim(), password });
-      router.replace(result.role === "patient" ? "/portal" : "/dashboard");
+      if (result.role === "patient") {
+        router.replace("/portal");
+      } else if (result.role === "authority_user") {
+        router.replace("/authority");
+      } else {
+        router.replace("/dashboard");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed");
     } finally {

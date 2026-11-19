@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import AuthContext
 from app.core import audit
 from app.core.errors import Conflict, NotFound, ValidationFailed
-from app.core.permissions import P
+from app.core.permissions import P, Track
 from app.core.security import decrypt_str, encrypt_str, mask
 from app.models.base import utcnow
 from app.models.clinical import Consent, Department, Patient, TrackEnrollment
@@ -43,6 +43,8 @@ def list_patients(
     active_only: bool = True,
 ) -> dict:
     ctx.require(P.PATIENTS_READ)
+    if track:
+        ctx.require_track(track)
     stmt = (
         select(Patient)
         .options(selectinload(Patient.enrollments))
@@ -94,7 +96,16 @@ def get_patient(ctx: AuthContext, patient_id: uuid.UUID) -> PatientDetailOut:
 
 def create_patient(ctx: AuthContext, req: PatientCreate) -> PatientDetailOut:
     ctx.require(P.PATIENTS_WRITE)
-    for t in req.tracks:
+    if req.tracks:
+        selected_tracks = list(dict.fromkeys(req.tracks))
+    else:
+        default_prog = (
+            ctx.organization.primary_programme
+            if ctx.organization and ctx.organization.primary_programme
+            else (ctx.organization.enabled_tracks[0] if ctx.organization and ctx.organization.enabled_tracks else "core")
+        )
+        selected_tracks = [Track(default_prog)]
+    for t in selected_tracks:
         ctx.require_track(t.value)
 
     existing = ctx.db.scalar(
@@ -140,7 +151,7 @@ def create_patient(ctx: AuthContext, req: PatientCreate) -> PatientDetailOut:
     ctx.db.flush()
 
     now = utcnow()
-    for t in dict.fromkeys(req.tracks):
+    for t in selected_tracks:
         ctx.db.add(
             TrackEnrollment(
                 organization_id=ctx.org_id,
@@ -149,9 +160,21 @@ def create_patient(ctx: AuthContext, req: PatientCreate) -> PatientDetailOut:
                 status="active",
                 enrolled_at=now,
                 context={},
+                authority_actor_id=ctx.user.id,
+                authority_reason="Primary facility registration",
+                history=[
+                    {
+                        "action": "enrolled",
+                        "track": t.value,
+                        "actor_id": str(ctx.user.id),
+                        "actor_email": ctx.user.email,
+                        "at": now.isoformat(),
+                        "reason": "Primary facility registration",
+                    }
+                ],
             )
         )
-    ctx.audit("patient.create", "patient", p.id, patient_id=p.id, details={"mrn": p.mrn, "tracks": [t.value for t in req.tracks]})
+    ctx.audit("patient.create", "patient", p.id, patient_id=p.id, details={"mrn": p.mrn, "tracks": [t.value for t in selected_tracks]})
     ctx.db.commit()
     p = ctx.db.scalar(select(Patient).options(selectinload(Patient.enrollments)).where(Patient.id == p.id))
     assert p is not None
@@ -234,12 +257,34 @@ def enroll_track(ctx: AuthContext, patient_id: uuid.UUID, req: EnrollmentCreate)
     )
     if p is None:
         raise NotFound("Patient not found")
+    now = utcnow()
+    reason = req.reason or "Authorised clinical enrolment update"
     existing = ctx.db.scalar(
         select(TrackEnrollment).where(TrackEnrollment.patient_id == p.id, TrackEnrollment.track == req.track.value)
     )
     if existing is not None:
         existing.status = "active"
         existing.context = {**(existing.context or {}), **req.context}
+        existing.authority_actor_id = ctx.user.id
+        existing.authority_reason = reason
+        existing.history = [
+            *list(existing.history or []),
+            {
+                "action": "reactivated",
+                "track": req.track.value,
+                "actor_id": str(ctx.user.id),
+                "actor_email": ctx.user.email,
+                "at": now.isoformat(),
+                "reason": reason,
+            },
+        ]
+        ctx.audit(
+            "patient.enroll.reactivate",
+            "track_enrollment",
+            existing.id,
+            patient_id=p.id,
+            details={"track": req.track.value, "reason": reason},
+        )
         ctx.db.commit()
         return existing
     enr = TrackEnrollment(
@@ -247,11 +292,24 @@ def enroll_track(ctx: AuthContext, patient_id: uuid.UUID, req: EnrollmentCreate)
         patient_id=p.id,
         track=req.track.value,
         status="active",
-        enrolled_at=utcnow(),
+        enrolled_at=now,
         context=req.context,
+        authority_actor_id=ctx.user.id,
+        authority_reason=reason,
+        history=[
+            {
+                "action": "enrolled",
+                "track": req.track.value,
+                "actor_id": str(ctx.user.id),
+                "actor_email": ctx.user.email,
+                "at": now.isoformat(),
+                "reason": reason,
+            }
+        ],
     )
     ctx.db.add(enr)
-    ctx.audit("patient.enroll", "track_enrollment", patient_id=p.id, details={"track": req.track.value})
+    ctx.db.flush()
+    ctx.audit("patient.enroll", "track_enrollment", enr.id, patient_id=p.id, details={"track": req.track.value, "reason": reason})
     ctx.db.commit()
     return enr
 
@@ -279,6 +337,9 @@ def record_consent(ctx: AuthContext, req: ConsentCreate) -> Consent:
         scope=req.scope.value,
         status=ConsentStatus.GRANTED.value,
         method=req.method,
+        policy_version=req.policy_version,
+        authority_to_act=req.authority_to_act,
+        actor_user_id=ctx.user.id,
         granted_by_name=req.granted_by_name or f"{p.given_name} {p.family_name}",
         recorded_by_id=ctx.user.id,
         effective_at=req.effective_at or utcnow(),
@@ -288,7 +349,13 @@ def record_consent(ctx: AuthContext, req: ConsentCreate) -> Consent:
     )
     ctx.db.add(c)
     ctx.db.flush()
-    ctx.audit("consent.grant", "consent", c.id, patient_id=p.id, details={"scope": c.scope, "method": c.method})
+    ctx.audit(
+        "consent.grant",
+        "consent",
+        c.id,
+        patient_id=p.id,
+        details={"scope": c.scope, "method": c.method, "policy_version": c.policy_version, "authority_to_act": c.authority_to_act},
+    )
     ctx.db.commit()
     return c
 

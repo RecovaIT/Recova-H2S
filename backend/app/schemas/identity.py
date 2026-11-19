@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -32,10 +32,17 @@ class OrganizationCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
     slug: str = Field(min_length=2, max_length=80, pattern=r"^[a-z0-9-]+$")
     org_type: Literal["clinic", "rehab_center", "public_health", "employer", "hospital"] = "clinic"
+    primary_programme: Track | None = None
     enabled_tracks: list[Track] = Field(default_factory=lambda: [Track.CORE, Track.LOOP, Track.NEURO, Track.WORKSAFE])
     country: str | None = Field(default="UAE", max_length=80)
     emirate: str | None = Field(default="Abu Dhabi", max_length=80)
     data_retention_days: int | None = Field(default=2555, ge=30, le=36500)
+
+
+class PrimaryProgrammeSelectionRequest(BaseModel):
+    primary_programme: Track
+    reason: str | None = Field(default=None, max_length=500)
+    restrict_to_primary: bool = False
 
 
 class OrganizationUpdate(BaseModel):
@@ -82,10 +89,21 @@ class BootstrapRequest(BaseModel):
     org_type: Literal["clinic", "rehab_center", "public_health", "employer", "hospital"] = "hospital"
     primary_programme: Track | None = None
     enabled_tracks: list[Track] = Field(default_factory=lambda: [Track.CORE, Track.LOOP, Track.NEURO, Track.WORKSAFE])
+    country: str | None = Field(default="UAE", max_length=80)
+    emirate: str | None = Field(default="Abu Dhabi", max_length=80)
+    idempotency_key: str | None = Field(default=None, max_length=120)
+    service_setup: dict[str, Any] = Field(default_factory=dict)
+    responsible_contact: dict[str, Any] = Field(default_factory=dict)
+    permitted_channels: list[str] = Field(default_factory=lambda: ["in_app"])
+    participation_consent: dict[str, Any] = Field(default_factory=dict)
     admin_email: EmailStr
     admin_full_name: str = Field(min_length=2, max_length=200)
     admin_password: str = Field(min_length=10, max_length=128)
     admin_license_number: str | None = Field(default=None, max_length=80)
+
+
+class PortalInvitationAcceptRequest(BaseModel):
+    token: str = Field(min_length=8, max_length=256)
 
 
 class ProgrammeRequestCreate(BaseModel):
@@ -140,8 +158,13 @@ class SessionResponse(BaseModel):
     user: UserOut
     active_organization: OrganizationOut | None
     role: str | None
+    primary_programme: str | None = None
+    programme_configuration_status: str | None = None
     permissions: list[str]
     tracks: list[str]
+    capability_flags: dict[str, bool] = Field(default_factory=dict)
+    active_enrolment: dict[str, Any] | None = None
+    participant_enrolments: list[dict[str, Any]] = Field(default_factory=list)
     memberships: list[MembershipOut]
     csrf_token: str | None = None
 

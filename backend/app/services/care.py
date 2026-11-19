@@ -223,6 +223,7 @@ def list_referrals(
     ctx.require(P.REFERRALS_READ)
     stmt = select(Referral).where(Referral.organization_id == ctx.org_id)
     if track:
+        ctx.require_track(track)
         stmt = stmt.where(Referral.track == track)
     if status:
         stmt = stmt.where(Referral.status == status)
@@ -593,6 +594,7 @@ def list_interventions(ctx: AuthContext, track: str | None = None, department_id
     ctx.require(P.INTERVENTIONS_READ)
     stmt = select(Intervention).where(Intervention.organization_id == ctx.org_id)
     if track:
+        ctx.require_track(track)
         stmt = stmt.where(Intervention.track == track)
     if department_id:
         stmt = stmt.where(Intervention.department_id == department_id)

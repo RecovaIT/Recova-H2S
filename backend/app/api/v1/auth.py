@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Body, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, client_ip, get_auth_context
@@ -15,6 +15,7 @@ from app.schemas.identity import (
     LoginRequest,
     PasswordResetConfirm,
     PasswordResetRequest,
+    PortalInvitationAcceptRequest,
     SessionResponse,
     SwitchOrganizationRequest,
 )
@@ -147,18 +148,27 @@ def change_password(req: ChangePasswordRequest, ctx: AuthContext = Depends(get_a
 
 
 @router.post("/accept-portal-invitation", response_model=Message)
-def accept_portal_invitation(token: str, ctx: AuthContext = Depends(get_auth_context)):
-    """Verify a single-use, expiring, recipient-bound invitation and link Patient.portal_user_id."""
+def accept_portal_invitation(
+    token: str | None = Query(default=None),
+    body: PortalInvitationAcceptRequest | None = Body(default=None),
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    """Verify a single-use, expiring, recipient-bound invitation and create ParticipantAccountLink."""
     from sqlalchemy import select
-    from app.core.errors import Forbidden, NotFound, ValidationFailed
+    from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailed
     from app.core.security import hash_token
     from app.models.base import utcnow
     from app.models.clinical import Patient
-    from app.models.identity import Membership, PortalInvitation
+    from app.models.identity import Membership, ParticipantAccountLink, PortalInvitation
+
+    raw_token = (body.token if body is not None else token) or ""
+    raw_token = raw_token.strip()
+    if not raw_token:
+        raise ValidationFailed("Invitation token is required.")
 
     now = utcnow()
-    inv = ctx.db.scalar(select(PortalInvitation).where(PortalInvitation.token_hash == hash_token(token.strip())))
-    if inv is None or inv.revoked_at is not None:
+    inv = ctx.db.scalar(select(PortalInvitation).where(PortalInvitation.token_hash == hash_token(raw_token)))
+    if inv is None or inv.revoked_at is not None or inv.purpose != "portal_link":
         raise NotFound("Invalid or revoked portal invitation.")
     if inv.expires_at < now:
         raise ValidationFailed("Portal invitation has expired.")
@@ -166,33 +176,76 @@ def accept_portal_invitation(token: str, ctx: AuthContext = Depends(get_auth_con
         raise Forbidden("This invitation is bound to a different recipient email.")
 
     patient = ctx.db.get(Patient, inv.patient_id)
-    if patient is None:
+    if patient is None or patient.organization_id != inv.organization_id:
         raise NotFound("Linked participant record not found.")
 
-    if inv.accepted_at is None:
-        patient.portal_user_id = ctx.user.id
-        inv.accepted_at = now
-        existing_mem = ctx.db.scalar(
-            select(Membership).where(
-                Membership.user_id == ctx.user.id,
-                Membership.organization_id == inv.organization_id,
+    if inv.accepted_at is not None:
+        if inv.accepted_by_user_id == ctx.user.id or patient.portal_user_id == ctx.user.id:
+            return Message(message="Portal invitation accepted and participant record linked.")
+        raise Conflict("This portal invitation has already been used.")
+
+    existing_link_for_user = ctx.db.scalar(
+        select(ParticipantAccountLink).where(
+            ParticipantAccountLink.user_id == ctx.user.id,
+            ParticipantAccountLink.organization_id == inv.organization_id,
+            ParticipantAccountLink.revoked_at.is_(None),
+        )
+    )
+    if existing_link_for_user is not None and existing_link_for_user.patient_id != patient.id:
+        raise Conflict("Your account is already linked to another participant record in this facility.")
+
+    existing_link_for_patient = ctx.db.scalar(
+        select(ParticipantAccountLink).where(
+            ParticipantAccountLink.patient_id == patient.id,
+            ParticipantAccountLink.revoked_at.is_(None),
+        )
+    )
+    if existing_link_for_patient is not None and existing_link_for_patient.user_id != ctx.user.id:
+        raise Conflict("This participant record is already linked to another portal account.")
+
+    patient.portal_user_id = ctx.user.id
+    inv.accepted_at = now
+    inv.accepted_by_user_id = ctx.user.id
+
+    if existing_link_for_user is None:
+        ctx.db.add(
+            ParticipantAccountLink(
+                organization_id=inv.organization_id,
+                user_id=ctx.user.id,
+                patient_id=patient.id,
+                verified_at=now,
+                verification_source="invitation",
             )
         )
-        if existing_mem is None:
-            ctx.db.add(
-                Membership(
-                    user_id=ctx.user.id,
-                    organization_id=inv.organization_id,
-                    role="patient",
-                    is_active=True,
-                    department_ids=[],
-                )
-            )
-        ctx.audit(
-            "patient.portal_invitation.accept",
-            "portal_invitation",
-            inv.id,
-            details={"patient_id": str(patient.id), "organization_id": str(inv.organization_id)},
+
+    existing_mem = ctx.db.scalar(
+        select(Membership).where(
+            Membership.user_id == ctx.user.id,
+            Membership.organization_id == inv.organization_id,
         )
-        ctx.db.commit()
+    )
+    if existing_mem is None:
+        ctx.db.add(
+            Membership(
+                user_id=ctx.user.id,
+                organization_id=inv.organization_id,
+                role="patient",
+                is_active=True,
+                department_ids=[],
+            )
+        )
+    elif not existing_mem.is_active:
+        existing_mem.is_active = True
+
+    if ctx.session.active_organization_id is None:
+        ctx.session.active_organization_id = inv.organization_id
+
+    ctx.audit(
+        "patient.portal_invitation.accept",
+        "portal_invitation",
+        inv.id,
+        patient_id=patient.id,
+        details={"patient_id": str(patient.id), "organization_id": str(inv.organization_id)},
+    )
+    ctx.db.commit()
     return Message(message="Portal invitation accepted and participant record linked.")

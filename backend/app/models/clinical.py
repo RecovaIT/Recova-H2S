@@ -84,7 +84,7 @@ class Patient(UUIDPk, Timestamped, Base):
     job_role: Mapped[str | None] = mapped_column(String(120))
     # Ownership / portal
     primary_clinician_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
-    portal_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), unique=True)
+    portal_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
@@ -108,6 +108,9 @@ class TrackEnrollment(UUIDPk, Timestamped, Base):
     latest_risk_tier: Mapped[str | None] = mapped_column(String(20))
     latest_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     latest_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    authority_actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    authority_reason: Mapped[str | None] = mapped_column(Text)
+    history: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
 
     patient: Mapped[Patient] = relationship(back_populates="enrollments")
 
@@ -120,6 +123,9 @@ class Consent(UUIDPk, Timestamped, Base):
     scope: Mapped[str] = mapped_column(String(40), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     method: Mapped[str] = mapped_column(String(40), nullable=False, default="written")  # written|verbal_witnessed|electronic|guardian
+    policy_version: Mapped[str] = mapped_column(String(40), nullable=False, default="v1.0")
+    authority_to_act: Mapped[str] = mapped_column(String(80), nullable=False, default="self")  # self|legal_guardian|facility_admin
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     granted_by_name: Mapped[str | None] = mapped_column(String(200))  # patient or legal guardian
     recorded_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -154,6 +160,7 @@ class CheckIn(UUIDPk, Timestamped, Base):
     """Daily voice/text check-in (Core) or readiness check (WorkSafe)."""
 
     __tablename__ = "check_ins"
+    __table_args__ = (UniqueConstraint("patient_id", "idempotency_key", name="uq_checkin_patient_idem"),)
 
     organization_id: Mapped[uuid.UUID] = _org_fk()
     patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -169,6 +176,7 @@ class CheckIn(UUIDPk, Timestamped, Base):
     symptoms: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # structured symptom codes
     self_reported_crisis: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     submitted_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    idempotency_key: Mapped[str | None] = mapped_column(String(160))
     extra: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # readiness answers etc.
 
 
@@ -191,18 +199,22 @@ class CognitiveAssessment(UUIDPk, Timestamped, Base):
     """Neuro: one Multi-Cognitive Studio session with raw trial-level data."""
 
     __tablename__ = "cognitive_assessments"
+    __table_args__ = (UniqueConstraint("patient_id", "idempotency_key", name="uq_cognitive_patient_idem"),)
 
     organization_id: Mapped[uuid.UUID] = _org_fk()
     patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    enrollment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("track_enrollments.id", ondelete="SET NULL"), index=True)
     session_index: Mapped[int] = mapped_column(Integer, nullable=False)  # 1-based count for practice-effect modelling
+    task_version: Mapped[str | None] = mapped_column(String(60))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     assessment_language: Mapped[str] = mapped_column(String(5), nullable=False, default="en")
     administered_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    idempotency_key: Mapped[str | None] = mapped_column(String(160))
     environment: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # device, audio enabled, supervised
     raw_trials: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # per-task trial events
     derived_metrics: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="completed")  # in_progress|completed|abandoned
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="completed")  # in_progress|completed|abandoned|practice
 
 
 class WorkplaceAssessment(UUIDPk, Timestamped, Base):
