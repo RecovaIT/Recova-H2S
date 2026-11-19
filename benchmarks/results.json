@@ -1,0 +1,434 @@
+{
+  "generatedAt": "2026-11-19T23:28:58.803044+00:00",
+  "suiteName": "Recova Multi-Track Clinical & Safety Benchmark Suite",
+  "suiteVersion": "2026.1.0",
+  "algorithmVersion": "1.2.0",
+  "tracks": [
+    "core",
+    "loop",
+    "neuro",
+    "worksafe"
+  ],
+  "status": "completed",
+  "totalCases": 15,
+  "passedCases": 15,
+  "metrics": {
+    "sensitivity_pct": 100.0,
+    "specificity_pct": 100.0,
+    "emergency_detection_accuracy_pct": 100.0,
+    "true_positives": 8,
+    "false_positives": 0,
+    "true_negatives": 5,
+    "false_negatives": 0,
+    "missing_data_pass_rate_pct": 100.0,
+    "scoring_consistency_pct": 100.0,
+    "agent_execution_failures": 0,
+    "mean_duration_ms": 128.04,
+    "max_duration_ms": 359.2,
+    "note": "All metrics calculated directly from executed synthetic benchmark cases; zero hardcoded figures."
+  },
+  "cases": [
+    {
+      "caseId": "BM-CONSENT-01",
+      "track": "core",
+      "scenario": "Governance: Missing Mandatory Consent Blocks Routine Analysis",
+      "category": "consent",
+      "expected": {
+        "risk_tier": null,
+        "run_status": "blocked",
+        "is_emergency": false,
+        "max_confidence": null,
+        "consent_blocked": true
+      },
+      "actual": {
+        "primary_z": null,
+        "risk_tier": null,
+        "run_status": "blocked",
+        "is_emergency": false,
+        "missing_streams": [],
+        "confidence_index": null,
+        "scoring_consistent": null,
+        "primary_metric_code": null
+      },
+      "passed": true,
+      "failureDetails": null,
+      "durationMs": 46.88
+    },
+    {
+      "caseId": "BM-CORE-01",
+      "track": "core",
+      "scenario": "Core: Stable Recovery Control (7.5h sleep, stable HRV & mood)",
+      "category": "normal",
+      "expected": {
+        "risk_tier": "GREEN",
+        "run_status": "completed",
+        "is_emergency": false,
+        "max_confidence": null,
+        "consent_blocked": false
+      },
+      "actual": {
+        "primary_z": 0.4472,
+        "risk_tier": "GREEN",
+        "run_status": "completed",
+        "is_emergency": false,
+        "missing_streams": [],
+        "confidence_index": 100.0,
+        "scoring_consistent": true,
+        "primary_metric_code": "mood_score"
+      },
+      "passed": true,
+      "failureDetails": null,
+      "durationMs": 359.2
+    },
+    {
+      "caseId": "BM-CORE-02",
+      "track": "core",
+      "scenario": "Core: Pre-Relapse Sleep & Autonomic Drift (4-day drop to 4.2h sleep)",
+      "category": "gradual_decline",
+      "expected": {
+        "risk_tier": "RED",
+        "run_status": "completed",
+        "is_emergency": false,
+        "max_confidence": null,
+        "consent_blocked": false
+      },
+      "actual": {
+        "primary_z": -25.9384,
+        "risk_tier": "RED",
+        "run_status": "completed",
+        "is_emergency": false,
+        "missing_streams": [],
+        "confidence_index": 100.0,
+        "scoring_consistent": true,
+        "primary_metric_code": "sleep_hours"
+      },
+      "passed": true,
+      "failureDetails": null,
+      "durationMs": 177.26
+    },
+    {
+      "caseId": "BM-CORE-03",
+      "track": "core",
+      "scenario": "Core: Missing Smartwatch Sensor Stream (Check-in only graceful degradation)",
+      "category": "missing_data",
+      "expected": {
+        "risk_tier": null,
+        "run_status": "completed",
+        "is_emergency": false,
+        "max_confidence": 70.0,
+        "consent_blocked": false
+      },
+      "actual": {
+        "primary_z": 8.7207,
+        "risk_tier": "RED",
+        "run_status": "completed",
+        "is_emergency": false,
+        "missing_streams": [
+          "wearable_sleep",
+          "wearable_hrv",
+          "wearable_hr"
+        ],
+        "confidence_index": 46.0,
+        "scoring_consistent": true,
+        "primary_metric_code": "craving_score"
+      },
+      "passed": true,
+      "failureDetails": null,
+      "durationMs": 110.74
+    },
+    {
+      "caseId": "BM-CORE-04",
+      "track": "core",
+      "scenario": "Core: Acute Suicidal Ideation Crisis (Gate 2 Emergency Bypass)",
+      "category": "acute_emergency",
+      "expected": {
+        "risk_tier": "EMERGENCY_BYPASS",
+        "run_status": "emergency_bypass",
+        "is_emergency": true,
+        "max_confidence": null,
+        "consent_blocked": false
+      },
+      "actual": {
+        "primary_z": null,
+        "risk_tier": "EMERGENCY_BYPASS",
+        "run_status": "emergency_bypass",
+        "is_emergency": true,
+        "missing_streams": [],
+        "confidence_index": 100.0,
+        "scoring_consistent": null,
+        "primary_metric_code": null
+      },
+      "passed": true,
+      "failureDetails": null,
+      "durationMs": 117.6
+    },
+    {
+      "caseId": "BM-CORE-05",
+      "track": "core",
+      "scenario": "Core: Severe Withdrawal Seizure Indicators (Gate 2 Emergency Bypass)",
+      "category": "acute_emergency",
+      "expected": {
+        "risk_tier": "EMERGENCY_BYPASS",
+        "run_status": "emergency_bypass",
+        "is_emergency": true,
+        "max_confidence": null,
+        "consent_blocked": false
+      },
+      "actual": {
+        "primary_z": null,
+        "risk_tier": "EMERGENCY_BYPASS",
+        "run_status": "emergency_bypass",
+        "is_emergency": true,
+        "missing_streams": [],
+        "confidence_index": 100.0,
+        "scoring_consistent": null,
+        "primary_metric_code": null
+      },
+      "passed": true,
+      "failureDetails": null,
+      "durationMs": 76.08
+    },
+    {
+      "caseId": "BM-LOOP-01",
+      "track": "loop",
+      "scenario": "Loop: Stable IFHAS Cardiometabolic Control",
+      "category": "normal",
+      "expected": {
+        "risk_tier": "GREEN",
+        "run_status": "completed",
+        "is_emergency": false,
+        "max_confidence": null,
+        "consent_blocked": false
+      },
+      "actual": {
+        "primary_z": 0.6667,
+        "risk_tier": "GREEN",
+        "run_status": "completed",
+        "is_emergency": false,
+        "missing_streams": [],
+        "confidence_index": 95.0,
+        "scoring_consistent": true,
+        "primary_metric_code": "hba1c"
+      },
+      "passed": true,
+      "failureDetails": null,
+      "durationMs": 121.83
+    },
+    {
+      "caseId": "BM-LOOP-02",
+      "track": "loop",
+      "scenario": "Loop: IFHAS HbA1c & Blood Pressure Drift (5.4% -> 6.9%)",
+      "category": "gradual_decline",
+      "expected": {
+        "risk_tier": "RED",
+        "run_status": "completed",
+        "is_emergency": false,
+        "max_confidence": null,
+        "consent_blocked": false
+      },
+      "actual": {
+        "primary_z": 18.3333,
+        "risk_tier": "RED",
+        "run_status": "completed",
+        "is_emergency": false,
+        "missing_streams": [],
+        "confidence_index": 95.0,
+        "scoring_consistent": true,
+        "primary_metric_code": "hba1c"
+      },
+      "passed": true,
+      "failureDetails": null,
+      "durationMs": 113.79
+    },
+    {
+      "caseId": "BM-LOOP-03",
+      "track": "loop",
+      "scenario": "Loop: PHQ-9 Item 9 Self-Harm Flag (Gate 2 Emergency Bypass)",
+      "category": "acute_emergency",
+      "expected": {
+        "risk_tier": "EMERGENCY_BYPASS",
+        "run_status": "emergency_bypass",
+        "is_emergency": true,
+        "max_confidence": null,
+        "consent_blocked": false
+      },
+      "actual": {
+        "primary_z": null,
+        "risk_tier": "EMERGENCY_BYPASS",
+        "run_status": "emergency_bypass",
+        "is_emergency": true,
+        "missing_streams": [],
+        "confidence_index": 100.0,
+        "scoring_consistent": null,
+        "primary_metric_code": null
+      },
+      "passed": true,
+      "failureDetails": null,
+      "durationMs": 109.19
+    },
+    {
+      "caseId": "BM-NEURO-01",
+      "track": "neuro",
+      "scenario": "Neuro: Stable Cognitive Longitudinal Baseline",
+      "category": "normal",
+      "expected": {
+        "risk_tier": "GREEN",
+        "run_status": "completed",
+        "is_emergency": false,
+        "max_confidence": null,
+        "consent_blocked": false
+      },
+      "actual": {
+        "primary_z": 0.5,
+        "risk_tier": "GREEN",
+        "run_status": "completed",
+        "is_emergency": false,
+        "missing_streams": [],
+        "confidence_index": 95.0,
+        "scoring_consistent": true,
+        "primary_metric_code": "cog_sequence_accuracy"
+      },
+      "passed": true,
+      "failureDetails": null,
+      "durationMs": 149.31
+    },
+    {
+      "caseId": "BM-NEURO-02",
+      "track": "neuro",
+      "scenario": "Neuro: Mild Presbycusis Confounder (SE Expanded \u2014 Avoids False Red)",
+      "category": "confounder",
+      "expected": {
+        "risk_tier": "GREEN",
+        "run_status": "completed",
+        "is_emergency": false,
+        "max_confidence": null,
+        "consent_blocked": false
+      },
+      "actual": {
+        "primary_z": -0.9333,
+        "risk_tier": "GREEN",
+        "run_status": "completed",
+        "is_emergency": false,
+        "missing_streams": [
+          "cognitive_executive",
+          "cognitive_recall"
+        ],
+        "confidence_index": 65.0,
+        "scoring_consistent": true,
+        "primary_metric_code": "cog_auditory_accuracy"
+      },
+      "passed": true,
+      "failureDetails": null,
+      "durationMs": 116.68
+    },
+    {
+      "caseId": "BM-NEURO-03",
+      "track": "neuro",
+      "scenario": "Neuro: Actionable Executive & Recall Decline (All Streams Present)",
+      "category": "gradual_decline",
+      "expected": {
+        "risk_tier": "RED",
+        "run_status": "completed",
+        "is_emergency": false,
+        "max_confidence": null,
+        "consent_blocked": false
+      },
+      "actual": {
+        "primary_z": -22.0,
+        "risk_tier": "RED",
+        "run_status": "completed",
+        "is_emergency": false,
+        "missing_streams": [],
+        "confidence_index": 95.0,
+        "scoring_consistent": true,
+        "primary_metric_code": "cog_recall_accuracy"
+      },
+      "passed": true,
+      "failureDetails": null,
+      "durationMs": 119.38
+    },
+    {
+      "caseId": "BM-OSH-01",
+      "track": "worksafe",
+      "scenario": "WorkSafe: Normal Shift Readiness & Thermal Recovery",
+      "category": "normal",
+      "expected": {
+        "risk_tier": "GREEN",
+        "run_status": "completed",
+        "is_emergency": false,
+        "max_confidence": null,
+        "consent_blocked": false
+      },
+      "actual": {
+        "primary_z": 0.75,
+        "risk_tier": "GREEN",
+        "run_status": "completed",
+        "is_emergency": false,
+        "missing_streams": [
+          "workplace_env"
+        ],
+        "confidence_index": 79.0,
+        "scoring_consistent": true,
+        "primary_metric_code": "core_temp_est_c"
+      },
+      "passed": true,
+      "failureDetails": null,
+      "durationMs": 107.5
+    },
+    {
+      "caseId": "BM-OSH-02",
+      "track": "worksafe",
+      "scenario": "WorkSafe: Delayed HR Recovery & Core Temp Drift (Heat Fatigue)",
+      "category": "gradual_decline",
+      "expected": {
+        "risk_tier": "RED",
+        "run_status": "completed",
+        "is_emergency": false,
+        "max_confidence": null,
+        "consent_blocked": false
+      },
+      "actual": {
+        "primary_z": 20.3333,
+        "risk_tier": "RED",
+        "run_status": "completed",
+        "is_emergency": false,
+        "missing_streams": [
+          "worker_readiness",
+          "workplace_env"
+        ],
+        "confidence_index": 63.0,
+        "scoring_consistent": true,
+        "primary_metric_code": "hr_recovery_minutes"
+      },
+      "passed": true,
+      "failureDetails": null,
+      "durationMs": 118.21
+    },
+    {
+      "caseId": "BM-OSH-03",
+      "track": "worksafe",
+      "scenario": "WorkSafe: Suspected Exertional Heatstroke Core Temp >= 40C (Gate 2 Bypass)",
+      "category": "acute_emergency",
+      "expected": {
+        "risk_tier": "EMERGENCY_BYPASS",
+        "run_status": "emergency_bypass",
+        "is_emergency": true,
+        "max_confidence": null,
+        "consent_blocked": false
+      },
+      "actual": {
+        "primary_z": null,
+        "risk_tier": "EMERGENCY_BYPASS",
+        "run_status": "emergency_bypass",
+        "is_emergency": true,
+        "missing_streams": [],
+        "confidence_index": 100.0,
+        "scoring_consistent": null,
+        "primary_metric_code": null
+      },
+      "passed": true,
+      "failureDetails": null,
+      "durationMs": 76.99
+    }
+  ]
+}
