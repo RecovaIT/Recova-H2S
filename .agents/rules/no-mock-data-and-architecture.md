@@ -1,6 +1,6 @@
 ---
 description: Zero mock data, end-to-end backend integration, DECIDE-AI governance, and clinical safety rules for Recova-H2S
-globs: ["frontend/src/**/*", "backend/app/**/*"]
+globs: "frontend/src/**/*, backend/app/**/*"
 ---
 
 # Codebase Rules: No Mock Data & End-to-End Integrity

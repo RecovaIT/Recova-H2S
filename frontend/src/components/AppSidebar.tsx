@@ -26,9 +26,30 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useLanguage } from "@/hooks/useLanguage";
 import { useToast } from "@/components/ui/toast";
 import { RecovaMark } from "@/components/RecovaMark";
 import { cn, formatLabel } from "@/lib/utils";
+
+const SIDEBAR_AR: Record<string, string> = {
+  Overview: "نظرة عامة",
+  Dashboard: "لوحة التحكم",
+  Reports: "التقارير",
+  "Care management": "إدارة الرعاية",
+  Participants: "المشاركون",
+  "Recova Core": "ريكوفا للتعافي",
+  "Recova Loop": "ريكوفا لوب",
+  "Recova Neuro": "ريكوفا للأعصاب",
+  "Recova WorkSafe": "ريكوفا لسلامة العمل",
+  "Clinical reviews": "المراجعات السريرية",
+  "Referrals & care": "الإحالات والرعاية",
+  "Public-health notices": "إشعارات الصحة العامة",
+  "Tools & settings": "الأدوات والإعدادات",
+  "Agent monitoring": "مراقبة الوكلاء",
+  Benchmarks: "المعايير",
+  "Organisation settings": "إعدادات المنشأة",
+  Administration: "الإدارة",
+};
 
 type NavigationItem = {
   href: string;
@@ -176,12 +197,14 @@ function NavigationGroup({
   onNavigate?: () => void;
 }) {
   const [open, setOpen] = useState(true);
+  const { isAr, t } = useLanguage();
   const reduceMotion = useReducedMotion();
+  const displayGroupLabel = isAr ? t(SIDEBAR_AR[label] ? label : label) : label;
   const navigationId = useId();
   const expanded = collapsed || searching || open;
 
   return (
-    <section aria-label={label} className={collapsed ? "mb-2" : "mb-4"}>
+    <section aria-label={displayGroupLabel} className={collapsed ? "mb-2" : "mb-4"}>
       {!collapsed && (
         <button
           type="button"
@@ -189,31 +212,31 @@ function NavigationGroup({
           aria-controls={navigationId}
           onClick={() => setOpen((value) => !value)}
           disabled={searching}
-          className="group mb-1 flex w-full items-center rounded-[9px] px-3.5 py-1.5 text-left text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+          className="group mb-1 flex w-full items-center rounded-[9px] px-3.5 py-1.5 text-start text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500 hover:bg-slate-100 hover:text-slate-700"
         >
           <AnimatePresence initial={false} mode="popLayout">
             {!expanded && (
               <motion.span
                 key={id}
-                initial={{ opacity: 0, x: -8, scale: 0.8 }}
+                initial={{ opacity: 0, x: isAr ? 8 : -8, scale: 0.8 }}
                 animate={{ opacity: 1, x: 0, scale: 1 }}
-                exit={{ opacity: 0, x: -8, scale: 0.8 }}
+                exit={{ opacity: 0, x: isAr ? 8 : -8, scale: 0.8 }}
                 transition={
                   reduceMotion
                     ? { duration: 0 }
                     : { type: "spring", stiffness: 420, damping: 28 }
                 }
-                className="mr-2 flex h-5 w-5 items-center justify-center rounded-md bg-teal-700/8 text-teal-700"
+                className="me-2 flex h-5 w-5 items-center justify-center rounded-md bg-teal-700/8 text-teal-700"
               >
                 <GroupIcon className="h-3 w-3" />
               </motion.span>
             )}
           </AnimatePresence>
-          <span className="flex-1 whitespace-nowrap">{label}</span>
+          <span className="flex-1 whitespace-nowrap">{displayGroupLabel}</span>
           <ChevronDown
             className={cn(
               "h-3.5 w-3.5 transition-transform duration-300 motion-reduce:transition-none",
-              !expanded && "-rotate-90",
+              !expanded && (isAr ? "rotate-90" : "-rotate-90"),
             )}
           />
         </button>
@@ -237,6 +260,7 @@ function NavigationGroup({
           {items.map((item, index) => {
             const active =
               pathname === item.href || pathname.startsWith(item.href + "/");
+            const displayLabel = isAr ? SIDEBAR_AR[item.label] || t(item.label) : item.label;
             return (
               <motion.div
                 key={item.href}
@@ -260,8 +284,8 @@ function NavigationGroup({
                 <Link
                   href={item.href}
                   onClick={onNavigate}
-                  title={collapsed ? item.label : undefined}
-                  aria-label={collapsed ? item.label : undefined}
+                  title={collapsed ? displayLabel : undefined}
+                  aria-label={collapsed ? displayLabel : undefined}
                   aria-current={active ? "page" : undefined}
                   className={cn(
                     "flex min-h-10 items-center gap-2.5 rounded-[10px] px-3.5 py-2.5 text-[12px]",
@@ -273,7 +297,7 @@ function NavigationGroup({
                 >
                   <item.icon className="h-4 w-4 shrink-0" strokeWidth={1.7} />
                   {!collapsed && (
-                    <span className="whitespace-nowrap">{item.label}</span>
+                    <span className="whitespace-nowrap">{displayLabel}</span>
                   )}
                 </Link>
               </motion.div>
@@ -298,6 +322,7 @@ export function AppSidebar({
   const router = useRouter();
   const { session, hasPermission, hasTrack, switchOrganization, logout } =
     useAuth();
+  const { t, tr } = useLanguage();
   const { pushToast } = useToast();
   const [query, setQuery] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
@@ -350,7 +375,7 @@ export function AppSidebar({
       >
         <Link
           href="/dashboard"
-          aria-label="Recova dashboard"
+          aria-label={t("Recova dashboard")}
           onClick={onNavigate}
           className="flex h-10 w-10 shrink-0 items-center justify-center text-teal-700"
         >
@@ -358,15 +383,15 @@ export function AppSidebar({
         </Link>
         {!collapsed && (
           <span className="flex-1 text-[23px] font-bold tracking-[-0.05em] text-slate-900">
-            Recova
+            {t("Recova")}
           </span>
         )}
         {onNavigate && (
           <button
             type="button"
-            aria-label="Close menu"
+            aria-label={t("Close menu")}
             onClick={onNavigate}
-            className="ml-auto rounded-lg p-2 text-slate-500 hover:bg-slate-100"
+            className="ms-auto rounded-lg p-2 text-slate-500 hover:bg-slate-100"
           >
             <X className="h-4 w-4" />
           </button>
@@ -375,20 +400,20 @@ export function AppSidebar({
 
       {!collapsed && (
         <div className="relative my-4 shrink-0">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <Search className="pointer-events-none absolute start-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
           <input
             type="search"
-            aria-label="Search navigation"
-            placeholder="Search menu…"
+            aria-label={t("Search navigation")}
+            placeholder={t("Search menu…")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="h-10 w-full rounded-[9px] border border-slate-200 bg-slate-100 pl-9 pr-3 text-xs text-slate-900 placeholder:text-slate-500"
+            className="h-10 w-full rounded-[9px] border border-slate-200 bg-slate-100 ps-9 pe-3 text-xs text-slate-900 placeholder:text-slate-500"
           />
         </div>
       )}
 
       <nav
-        aria-label="Main navigation"
+        aria-label={t("Main navigation")}
         className={cn(
           "min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-width:thin]",
           collapsed && "mt-5",
@@ -409,7 +434,7 @@ export function AppSidebar({
             role="status"
             className="px-3 py-6 text-xs leading-relaxed text-slate-500"
           >
-            No pages match “{query}”.
+            {tr(`No pages match “${query}”.`, `لا توجد صفحات تطابق "${query}".`)}
           </p>
         )}
       </nav>
@@ -417,12 +442,12 @@ export function AppSidebar({
       <div className="relative shrink-0 space-y-2 border-t border-slate-200 pt-3">
         {!collapsed && session && session.memberships.length > 1 && (
           <div className="relative">
-            <Building2 className="pointer-events-none absolute left-3 top-3 h-3.5 w-3.5 text-slate-500" />
+            <Building2 className="pointer-events-none absolute start-3 top-3 h-3.5 w-3.5 text-slate-500" />
             <select
-              aria-label="Active organisation"
+              aria-label={t("Active organisation")}
               value={session.active_organization?.id || ""}
               onChange={(event) => void changeOrganization(event.target.value)}
-              className="h-10 w-full rounded-[9px] border border-slate-200 bg-slate-100 pl-8 pr-2 text-xs text-slate-700"
+              className="h-10 w-full rounded-[9px] border border-slate-200 bg-slate-100 ps-8 pe-2 text-xs text-slate-700"
             >
               {session.memberships.map((membership) => (
                 <option key={membership.id} value={membership.organization_id}>
@@ -436,7 +461,7 @@ export function AppSidebar({
           <button
             type="button"
             tabIndex={-1}
-            aria-label="Close account menu"
+            aria-label={t("Close account menu")}
             className="fixed inset-0 z-40 cursor-default"
             onClick={() => setProfileOpen(false)}
           />
@@ -448,7 +473,7 @@ export function AppSidebar({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 8 }}
               transition={{ duration: reduceMotion ? 0 : 0.18 }}
-              className="absolute bottom-full left-0 z-50 mb-2 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg"
+              className="absolute bottom-full start-0 z-50 mb-2 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg"
               onKeyDown={(event) => {
                 if (event.key === "Escape") setProfileOpen(false);
               }}
@@ -468,7 +493,7 @@ export function AppSidebar({
                 }
                 className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-xs font-medium text-red-700 hover:bg-red-50"
               >
-                <LogOut className="h-3.5 w-3.5" /> Sign out
+                <LogOut className="h-3.5 w-3.5" /> {t("Sign out")}
               </button>
             </motion.div>
           )}
@@ -476,10 +501,10 @@ export function AppSidebar({
         <button
           type="button"
           aria-expanded={profileOpen}
-          aria-label="Account options"
+          aria-label={t("Account options")}
           onClick={() => setProfileOpen((value) => !value)}
           className={cn(
-            "relative flex w-full items-center gap-2.5 rounded-[11px] bg-slate-100 p-2.5 text-left hover:bg-slate-200/60",
+            "relative flex w-full items-center gap-2.5 rounded-[11px] bg-slate-100 p-2.5 text-start hover:bg-slate-200/60",
             collapsed && "justify-center p-1.5",
           )}
         >
@@ -487,10 +512,10 @@ export function AppSidebar({
             {initials}
             <span
               title={
-                connected ? "Live updates connected" : "Live updates connecting"
+                connected ? t("Live updates connected") : t("Live updates connecting")
               }
               className={cn(
-                "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#fafdff]",
+                "absolute -bottom-0.5 -end-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#fafdff]",
                 connected ? "bg-emerald-500" : "bg-slate-400",
               )}
             />
@@ -502,7 +527,7 @@ export function AppSidebar({
                   {session?.user.full_name}
                 </span>
                 <span className="mt-0.5 block truncate text-[10px] text-slate-500">
-                  {formatLabel(session?.role)}
+                  {t(formatLabel(session?.role))}
                 </span>
               </span>
               <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />

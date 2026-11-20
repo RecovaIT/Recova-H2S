@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 import { useAuth } from "@/hooks/useAuth";
+import { useLanguage } from "@/hooks/useLanguage";
 import { api } from "@/lib/api";
 import { RecovaMark } from "@/components/RecovaMark";
 import { Button } from "@/components/ui/button";
@@ -255,12 +256,14 @@ function MemoryActivity({
 
 export default function ParticipantPortal() {
   const { session, loading: authLoading, logout } = useAuth();
+  const { setLang: setGlobalLang } = useLanguage();
   const router = useRouter();
   const [lang, setLang] = useState<PortalLang>(() => {
     if (typeof window === "undefined") return "en";
-    return window.localStorage.getItem("recova_portal_lang") === "ar"
-      ? "ar"
-      : "en";
+    const saved =
+      window.localStorage.getItem("recova_portal_lang") ||
+      window.localStorage.getItem("recova_lang");
+    return saved === "ar" ? "ar" : "en";
   });
   const [data, setData] = useState<Portal | null>(null);
   const [careDetail, setCareDetail] = useState<PortalCareDetail | null>(null);
@@ -292,8 +295,10 @@ export default function ParticipantPortal() {
   function toggleLang() {
     const next: PortalLang = lang === "en" ? "ar" : "en";
     setLang(next);
+    setGlobalLang(next);
     if (typeof window !== "undefined") {
       window.localStorage.setItem("recova_portal_lang", next);
+      window.localStorage.setItem("recova_lang", next);
     }
   }
 

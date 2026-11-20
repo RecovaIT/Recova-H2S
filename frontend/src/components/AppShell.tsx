@@ -6,7 +6,9 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { AlertOctagon, Bell, Menu } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useLanguage } from "@/hooks/useLanguage";
 import { useRealtimeEvents } from "@/hooks/useRealtimeEvents";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { careService } from "@/services/care";
 import { engineService } from "@/services/engine";
 import type { EmergencyEvent, NotificationItem } from "@/types/recova";
@@ -26,6 +28,7 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const { session, hasPermission } = useAuth();
+  const { isAr, t, tr } = useLanguage();
   const { pushToast } = useToast();
 
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -109,7 +112,7 @@ export function AppShell({
           if (!event.currentTarget.contains(event.relatedTarget)) setSidebarFocused(false);
         }}
         className={cn(
-          "sticky top-0 hidden h-dvh shrink-0 border-r border-[#e8eff3] transition-[width] duration-300 ease-in-out md:block motion-reduce:transition-none",
+          "sticky top-0 hidden h-dvh shrink-0 border-e border-[#e8eff3] transition-[width] duration-300 ease-in-out md:block motion-reduce:transition-none",
           collapsed ? "w-[76px]" : "w-[248px]"
         )}
       >
@@ -130,7 +133,7 @@ export function AppShell({
             <motion.div
               role="dialog" aria-modal="true" aria-label="Navigation"
               className="relative h-full w-[min(280px,85vw)] shadow-xl"
-              initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }}
+              initial={{ x: isAr ? "100%" : "-100%" }} animate={{ x: 0 }} exit={{ x: isAr ? "100%" : "-100%" }}
               transition={{ duration: reduceMotion ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }}
             >
               <AppSidebar connected={connected} onNavigate={() => setMobileOpen(false)} />
@@ -145,14 +148,17 @@ export function AppShell({
             <div className="flex items-center gap-2">
               <AlertOctagon className="h-4 w-4 shrink-0" />
               <span>
-                ACTIVE EMERGENCY ESCALATION ({openEmergencies.length}): Gate 2 Red-Flag Bypass active. Immediate clinical triage required.
+                {tr(
+                  `ACTIVE EMERGENCY ESCALATION (${openEmergencies.length}): Gate 2 Red-Flag Bypass active. Immediate clinical triage required.`,
+                  `تصعيد طوارئ نشط (${openEmergencies.length}): مسار الطوارئ (البوابة ٢) مفعّل. يلزم فرز سريري فوري.`
+                )}
               </span>
             </div>
             <Link
               href="/agents"
               className="rounded bg-white px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
             >
-              Open Emergency Console
+              {t("Open Emergency Console")}
             </Link>
           </div>
         )}
@@ -168,13 +174,14 @@ export function AppShell({
               <Menu className="h-4 w-4" />
             </button>
             <div>
-              <h1 className="text-[22px] font-semibold tracking-tight text-slate-900 leading-tight">{title}</h1>
-              {subtitle && <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">{subtitle}</p>}
+              <h1 className="text-[22px] font-semibold tracking-tight text-slate-900 leading-tight">{t(title)}</h1>
+              {subtitle && <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">{t(subtitle)}</p>}
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             {actions}
+            <LanguageSwitcher variant="inline" />
             {hasPermission("notifications:read") && (
               <div className="relative">
                 <Button
@@ -192,21 +199,21 @@ export function AppShell({
                   )}
                 </Button>
                 {notifOpen && (
-                  <div className="absolute right-0 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-slate-200 bg-white p-3 shadow-xl z-40">
+                  <div className="absolute end-0 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-slate-200 bg-white p-3 shadow-xl z-40">
                     <div className="mb-2 flex items-center justify-between border-b border-slate-100 pb-2">
-                      <span className="text-xs font-semibold text-slate-900">Notifications Inbox</span>
+                      <span className="text-xs font-semibold text-slate-900">{t("Notifications Inbox")}</span>
                       <button
                         type="button"
                         onClick={() => setNotifOpen(false)}
                         className="text-xs text-slate-500 hover:text-slate-900"
                       >
-                        Close
+                        {t("Close")}
                       </button>
                     </div>
                     <div className="max-h-72 space-y-2 overflow-y-auto">
                       {notifications.length === 0 ? (
                         <p className="py-4 text-center text-xs text-slate-500">
-                          No notifications recorded yet.
+                          {t("No notifications recorded yet.")}
                         </p>
                       ) : (
                         notifications.map((n) => (

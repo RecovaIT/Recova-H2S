@@ -19,6 +19,8 @@ import {
   Workflow,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useLanguage } from "@/hooks/useLanguage";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import type { BootstrapPayload } from "@/services/auth";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -95,6 +97,7 @@ function slugifyOrgName(value: string): string {
 
 export function OrganizationOnboardingCard({ mode, initialProgramme = "core" }: { mode: "bootstrap" | "register"; initialProgramme?: ProgrammeId }) {
   const { bootstrap, registerOrganization } = useAuth();
+  const { t, tr } = useLanguage();
   const router = useRouter();
 
   const [step, setStep] = useState(1);
@@ -227,25 +230,33 @@ export function OrganizationOnboardingCard({ mode, initialProgramme = "core" }: 
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f0f6f9] p-4 text-[#011621]">
+    <div className="relative flex min-h-screen items-center justify-center bg-[#f0f6f9] p-4 text-[#011621]">
+      <LanguageSwitcher variant="floating" />
       <Card className="recova-card w-full max-w-3xl border-[#e2edf2] bg-[#fafdff]">
         <CardHeader className="border-b border-[#e2edf2] pb-4">
           <div className="mb-2 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-[#003e5e]">
               {isBootstrap ? <Activity className="h-5 w-5" /> : <Building2 className="h-5 w-5" />}
               <span className="text-xs font-bold uppercase tracking-wider">
-                {isBootstrap ? "Initial Platform Setup" : "Health Center Onboarding"}
+                {isBootstrap
+                  ? tr("Initial Platform Setup", "الإعداد الأولي للمنصة")
+                  : tr("Health Center Onboarding", "تسجيل مركز صحي جديد")}
               </span>
             </div>
             <span className="rounded-full bg-[#d7e6ed] px-2.5 py-0.5 text-[11px] font-semibold text-[#004263]">
-              Step {step} of 5
+              {tr(`Step ${step} of 5`, `الخطوة ${step} من 5`)}
             </span>
           </div>
           <CardTitle className="text-xl text-[#011621]">
-            {isBootstrap ? "Initialise Recova Engine & Primary Facility" : "Register a New Health Center"}
+            {isBootstrap
+              ? tr("Initialise Recova Engine & Primary Facility", "تهيئة محرك ريكوفا والمنشأة الرئيسية")
+              : tr("Register a New Health Center", "تسجيل مركز صحي جديد")}
           </CardTitle>
           <CardDescription className="text-[#5a7d93]">
-            Each health center selects one primary Recova sub-engine at signup. Additional programmes can be requested later from Settings.
+            {tr(
+              "Each health center selects one primary Recova sub-engine at signup. Additional programmes can be requested later from Settings.",
+              "يختار كل مركز صحي برنامجًا أساسيًا واحدًا عند التسجيل، ويمكن طلب برامج إضافية لاحقًا من الإعدادات."
+            )}
           </CardDescription>
 
           {/* Stepper */}
@@ -263,7 +274,7 @@ export function OrganizationOnboardingCard({ mode, initialProgramme = "core" }: 
                     !active && !completed && "border-[#e2edf2] bg-white text-[#5a7d93]"
                   )}
                 >
-                  {s.id}. {s.label}
+                  {s.id}. {t(s.label)}
                 </div>
               );
             })}
@@ -392,12 +403,12 @@ export function OrganizationOnboardingCard({ mode, initialProgramme = "core" }: 
 
             {step === 2 && (
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <p className="text-sm font-semibold text-[#011621]">
-                    Select One Primary Programme (Mutually Exclusive)
+                    {t("Select One Primary Programme (Mutually Exclusive)")}
                   </p>
                   <span className="text-xs text-[#5a7d93]">
-                    Determines staff dashboard &amp; patient portal experience
+                    {t("Determines staff dashboard & patient portal experience")}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -411,7 +422,7 @@ export function OrganizationOnboardingCard({ mode, initialProgramme = "core" }: 
                         onClick={() => setPrimaryProgramme(card.id)}
                         aria-pressed={selected}
                         className={cn(
-                          "flex flex-col gap-2 rounded-2xl border p-4 text-left transition-all",
+                          "flex flex-col gap-2 rounded-2xl border p-4 text-start transition-all",
                           selected
                             ? "border-[#003e5e] bg-[#edf7ef] ring-2 ring-[#003e5e]/20"
                             : "border-[#e2edf2] bg-white hover:border-[#a8c4d4]"
@@ -420,15 +431,15 @@ export function OrganizationOnboardingCard({ mode, initialProgramme = "core" }: 
                         <div className="flex items-center justify-between gap-2">
                           <span className="flex items-center gap-2 font-semibold text-[#011621]">
                             <Icon className="h-4 w-4 text-[#003e5e]" />
-                            {card.title}
+                            {t(card.title)}
                           </span>
                           {selected && <CheckCircle2 className="h-4 w-4 text-[#1a7a0a]" />}
                         </div>
-                        <p className="text-xs font-medium text-[#2a4558]">{card.subtitle}</p>
+                        <p className="text-xs font-medium text-[#2a4558]">{t(card.subtitle)}</p>
                         <div className="space-y-1 text-[11px] text-[#5a7d93]">
-                          <p><strong className="text-[#2a4558]">Audience:</strong> {card.audience}</p>
-                          <p><strong className="text-[#2a4558]">Inputs:</strong> {card.inputs}</p>
-                          <p><strong className="text-[#2a4558]">Daily Tasks:</strong> {card.tasks}</p>
+                          <p><strong className="text-[#2a4558]">{t("Audience:")}</strong> {t(card.audience)}</p>
+                          <p><strong className="text-[#2a4558]">{t("Inputs:")}</strong> {t(card.inputs)}</p>
+                          <p><strong className="text-[#2a4558]">{t("Daily Tasks:")}</strong> {t(card.tasks)}</p>
                         </div>
                       </button>
                     );
@@ -441,11 +452,11 @@ export function OrganizationOnboardingCard({ mode, initialProgramme = "core" }: 
               <div className="space-y-4">
                 <div className="rounded-2xl border border-[#e2edf2] bg-white p-4">
                   <p className="text-xs font-bold uppercase tracking-wider text-[#003e5e]">
-                    Service Setup — {selectedCard.title}
+                    {tr(`Service Setup — ${selectedCard.title}`, `إعداد الخدمة — ${t(selectedCard.title)}`)}
                   </p>
-                  <p className="mt-1 text-sm text-[#2a4558]">{selectedCard.outputs}</p>
+                  <p className="mt-1 text-sm text-[#2a4558]">{t(selectedCard.outputs)}</p>
                   <div className="mt-4">
-                    <Label htmlFor="service_contact">Primary Care / Operations Contact (Optional)</Label>
+                    <Label htmlFor="service_contact">{t("Primary Care / Operations Contact (Optional)")}</Label>
                     <Input
                       id="service_contact"
                       value={serviceContact}
@@ -457,12 +468,12 @@ export function OrganizationOnboardingCard({ mode, initialProgramme = "core" }: 
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="rounded-xl border border-[#e2edf2] bg-[#f8fbfc] p-3.5">
-                    <p className="text-xs font-semibold text-[#003e5e]">Staff Dashboard Preview</p>
-                    <p className="mt-1 text-xs text-[#5a7d93]">{selectedCard.tasks}</p>
+                    <p className="text-xs font-semibold text-[#003e5e]">{t("Staff Dashboard Preview")}</p>
+                    <p className="mt-1 text-xs text-[#5a7d93]">{t(selectedCard.tasks)}</p>
                   </div>
                   <div className="rounded-xl border border-[#c6edbc] bg-[#e4f3dd] p-3.5">
-                    <p className="text-xs font-semibold text-[#214e40]">Participant Portal Preview (/portal)</p>
-                    <p className="mt-1 text-xs text-[#214e40]/90">{selectedCard.portalPreview}</p>
+                    <p className="text-xs font-semibold text-[#214e40]">{t("Participant Portal Preview (/portal)")}</p>
+                    <p className="mt-1 text-xs text-[#214e40]/90">{t(selectedCard.portalPreview)}</p>
                   </div>
                 </div>
               </div>

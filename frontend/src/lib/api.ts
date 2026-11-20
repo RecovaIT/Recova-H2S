@@ -1,3 +1,5 @@
+import { watchIncomingPayload } from "@/lib/i18n-engine";
+
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "/api/v1";
 
@@ -104,6 +106,10 @@ export async function apiRequest<T>(
   const contentType = response.headers.get("content-type") || "";
   const isJson = contentType.includes("application/json");
   const payload = isJson ? await response.json().catch(() => null) : await response.text().catch(() => "");
+
+  if (isJson && payload && !path.startsWith("/i18n/")) {
+    watchIncomingPayload(payload);
+  }
 
   if (!response.ok) {
     const errObj = payload && typeof payload === "object" && "error" in payload

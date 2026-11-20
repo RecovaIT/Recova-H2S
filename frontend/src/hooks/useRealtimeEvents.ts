@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { API_BASE_URL } from "@/lib/api";
+import { watchIncomingPayload } from "@/lib/i18n-engine";
 
 export interface RealtimeEvent {
   type: string;
@@ -36,6 +37,7 @@ export function useRealtimeEvents(
           timestamp: parsed.timestamp || new Date().toISOString(),
           data: parsed.data || {},
         };
+        watchIncomingPayload(ev.data);
         setEvents((prev) => [ev, ...prev].slice(0, 50));
         callbackRef.current?.(ev);
       } catch {

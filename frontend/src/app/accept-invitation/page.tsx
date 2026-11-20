@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { useLanguage } from "@/hooks/useLanguage";
 import { authService } from "@/services/auth";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -74,9 +75,13 @@ function Setup() {
   const token = useSearchParams().get("token") || "";
   const router = useRouter();
   const { session, refreshSession, logout } = useAuth();
+  const { setLang: setGlobalLang } = useLanguage();
   const [lang, setLang] = useState<PortalLang>(() => {
     if (typeof window === "undefined") return "en";
-    return window.localStorage.getItem("recova_portal_lang") === "ar" ? "ar" : "en";
+    const saved =
+      window.localStorage.getItem("recova_portal_lang") ||
+      window.localStorage.getItem("recova_lang");
+    return saved === "ar" ? "ar" : "en";
   });
   const [details, setDetails] = useState<{
     facility: string;
@@ -95,8 +100,10 @@ function Setup() {
   function toggleLang() {
     const next: PortalLang = lang === "en" ? "ar" : "en";
     setLang(next);
+    setGlobalLang(next);
     if (typeof window !== "undefined") {
       window.localStorage.setItem("recova_portal_lang", next);
+      window.localStorage.setItem("recova_lang", next);
     }
   }
 
