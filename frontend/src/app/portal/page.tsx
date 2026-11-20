@@ -256,7 +256,7 @@ function MemoryActivity({
 
 export default function ParticipantPortal() {
   const { session, loading: authLoading, logout } = useAuth();
-  const { setLang: setGlobalLang } = useLanguage();
+  const { lang: globalLang, setLang: setGlobalLang, t: tGlobal } = useLanguage();
   const router = useRouter();
   const [lang, setLang] = useState<PortalLang>(() => {
     if (typeof window === "undefined") return "en";
@@ -265,6 +265,18 @@ export default function ParticipantPortal() {
       window.localStorage.getItem("recova_lang");
     return saved === "ar" ? "ar" : "en";
   });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved =
+      window.localStorage.getItem("recova_portal_lang") ||
+      window.localStorage.getItem("recova_lang");
+    if (saved === "ar" || saved === "en") {
+      setLang(saved);
+    } else if (globalLang === "ar" || globalLang === "en") {
+      setLang(globalLang);
+    }
+  }, [globalLang]);
   const [data, setData] = useState<Portal | null>(null);
   const [careDetail, setCareDetail] = useState<PortalCareDetail | null>(null);
   const [selectedEnrolmentId, setSelectedEnrolmentId] = useState<string | null>(
@@ -519,7 +531,7 @@ export default function ParticipantPortal() {
             >
               {data.enrolments.map((enr) => (
                 <option key={enr.enrolment_id} value={enr.enrolment_id}>
-                  {`${enr.facility} · ${enr.programme.toUpperCase()}`}
+                  {`${tGlobal(enr.facility)} · ${tGlobal(enr.programme.toUpperCase())}`}
                 </option>
               ))}
             </select>
@@ -527,7 +539,7 @@ export default function ParticipantPortal() {
         )}
         {data.synthetic && (
           <div className="mb-4 rounded-xl bg-[#e8f1f6] px-3 py-2 text-[11px] text-slate-600">
-            {`${t.syntheticAccountBadge} · ${data.scenario ?? ""}`}
+            {`${t.syntheticAccountBadge}${data.scenario ? ` · ${tGlobal(data.scenario)}` : ""}`}
           </div>
         )}
         {error && (

@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LanguageProvider } from "@/hooks/useLanguage";
 import { ToastProvider } from "@/components/ui/toast";
 import { AppShell } from "@/components/AppShell";
+import { AuthGuard } from "@/components/AuthGuard";
 import { LandingNavigation } from "@/components/marketing/LandingNavigation";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ProgrammeExplorer } from "@/components/marketing/ProgrammeExplorer";
 import { watchIncomingPayload } from "@/lib/i18n-engine";
 
@@ -44,7 +46,7 @@ vi.mock("@/hooks/useAuth", () => ({
       permissions: ["org:read", "notifications:read"],
     },
     hasPermission: () => true,
-    hasTrack: () => true,
+    hasTrack: (track: string) => track !== "restricted",
     switchOrganization: vi.fn(),
     logout: vi.fn(),
   }),
@@ -214,5 +216,42 @@ describe("Root-level i18n dictionary, navbars, patterns, and live watcher", () =
 
     await user.click(screen.getByRole("button", { name: "Toggle language" }));
     expect(screen.getByRole("link", { name: /Choose Recova Loop/i })).toBeInTheDocument();
+  });
+
+  it("switches AuthGuard fallback, 37-fixture test scenarios, facility names, and portal options between English and Arabic", async () => {
+    const user = userEvent.setup();
+    render(
+      <LanguageProvider>
+        <AuthGuard requiredTrack="restricted">
+          <div>Protected</div>
+        </AuthGuard>
+        <LanguageSwitcher />
+        <div>
+          <span>Judge Demo: Recova Recovery Centre</span>
+          <span>gradual_decline</span>
+          <span>missing_data</span>
+          <span>absent_consent</span>
+          <select aria-label="Enrolment">
+            <option value="1">Judge Demo: Recova Loop Clinic · LOOP</option>
+          </select>
+        </div>
+      </LanguageProvider>
+    );
+
+    expect(screen.getByText("Track Not Enabled for Role/Org")).toBeInTheDocument();
+    expect(screen.getByText("Judge Demo: Recova Recovery Centre")).toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: "Toggle language" })[0]);
+
+    expect(screen.getByText("المسار غير مفعّل للدور أو المنشأة")).toBeInTheDocument();
+    expect(screen.getByText("عرض التحكيم: مركز ريكوفا للتعافي")).toBeInTheDocument();
+    expect(screen.getByText("تراجع تدريجي")).toBeInTheDocument();
+    expect(screen.getByText("بيانات ناقصة")).toBeInTheDocument();
+    expect(screen.getByText("دون موافقة")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "عرض التحكيم: عيادة ريكوفا لوب · لوب" })).toBeInTheDocument();
+
+    await user.click(screen.getAllByRole("button", { name: "Toggle language" })[0]);
+    expect(screen.getByText("Track Not Enabled for Role/Org")).toBeInTheDocument();
+    expect(screen.getByText("Judge Demo: Recova Recovery Centre")).toBeInTheDocument();
+    expect(screen.getByText("gradual_decline")).toBeInTheDocument();
   });
 });
