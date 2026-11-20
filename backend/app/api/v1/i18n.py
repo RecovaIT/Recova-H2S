@@ -248,7 +248,10 @@ def _translate_deterministic_ar(raw: str) -> str | None:
 
 async def _llm_translate_batch(texts: list[str]) -> dict[str, str]:
     s = get_settings()
-    if not s.llm_configured or not texts:
+    env_cfg = s.resolve_llm_env(None)
+    provider = env_cfg.get("provider") or "none"
+    api_key = env_cfg.get("api_key") or ""
+    if provider == "none" or not api_key or not texts:
         return {}
 
     prompt = (
@@ -262,13 +265,13 @@ async def _llm_translate_batch(texts: list[str]) -> dict[str, str]:
     try:
         async with httpx.AsyncClient(timeout=min(s.llm_timeout_seconds, 12.0)) as client:
             raw_content = ""
-            if s.llm_provider == "openai":
-                base = (s.llm_base_url or "https://api.openai.com/v1").rstrip("/")
+            if provider == "openai":
+                base = (env_cfg.get("base_url") or "https://api.openai.com/v1").rstrip("/")
                 resp = await client.post(
                     f"{base}/chat/completions",
-                    headers={"Authorization": f"Bearer {s.llm_api_key}"},
+                    headers={"Authorization": f"Bearer {api_key}"},
                     json={
-                        "model": s.llm_model or "gpt-4o-mini",
+                        "model": env_cfg.get("model") or "gpt-4o-mini",
                         "temperature": 0.1,
                         "response_format": {"type": "json_object"},
                         "messages": [{"role": "user", "content": prompt}],
@@ -276,12 +279,16 @@ async def _llm_translate_batch(texts: list[str]) -> dict[str, str]:
                 )
                 resp.raise_for_status()
                 raw_content = resp.json()["choices"][0]["message"]["content"]
-            elif s.llm_provider == "azure_openai":
-                base = s.llm_base_url.rstrip("/")
+            elif provider == "azure_openai":
+                base = env_cfg.get("base_url", "").rstrip("/")
+                dep = env_cfg.get("azure_deployment", "")
+                ver = env_cfg.get("azure_api_version") or s.llm_azure_api_version
+                if not base or not dep:
+                    return {}
                 resp = await client.post(
-                    f"{base}/openai/deployments/{s.llm_azure_deployment}/chat/completions",
-                    params={"api-version": s.llm_azure_api_version},
-                    headers={"api-key": s.llm_api_key},
+                    f"{base}/openai/deployments/{dep}/chat/completions",
+                    params={"api-version": ver},
+                    headers={"api-key": api_key},
                     json={
                         "temperature": 0.1,
                         "response_format": {"type": "json_object"},
@@ -290,11 +297,11 @@ async def _llm_translate_batch(texts: list[str]) -> dict[str, str]:
                 )
                 resp.raise_for_status()
                 raw_content = resp.json()["choices"][0]["message"]["content"]
-            elif s.llm_provider == "gemini":
-                model = s.llm_model or "gemini-2.0-flash"
+            elif provider == "gemini":
+                model = env_cfg.get("model") or "gemini-2.0-flash"
                 resp = await client.post(
                     f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                    params={"key": s.llm_api_key},
+                    params={"key": api_key},
                     json={
                         "contents": [{"parts": [{"text": prompt}]}],
                         "generationConfig": {"responseMimeType": "application/json", "temperature": 0.1},
@@ -302,15 +309,15 @@ async def _llm_translate_batch(texts: list[str]) -> dict[str, str]:
                 )
                 resp.raise_for_status()
                 raw_content = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-            elif s.llm_provider == "anthropic":
+            elif provider == "anthropic":
                 resp = await client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers={
-                        "x-api-key": s.llm_api_key,
+                        "x-api-key": api_key,
                         "anthropic-version": "2023-06-01",
                     },
                     json={
-                        "model": s.llm_model or "claude-3-5-haiku-latest",
+                        "model": env_cfg.get("model") or "claude-3-5-haiku-latest",
                         "max_tokens": 2048,
                         "temperature": 0.1,
                         "messages": [{"role": "user", "content": prompt}],

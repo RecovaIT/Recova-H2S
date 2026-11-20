@@ -142,3 +142,92 @@ def test_rbac_override_and_user_deactivation(client: TestClient):
 
     client.post("/api/v1/auth/logout", headers=h)
     assert client.post("/api/v1/auth/login", json={"email": "coord@adwellness.ae", "password": "CoordPass123!"}).status_code == 401
+
+
+def test_llm_key_status_prefers_backend_env_then_org_without_leaking_plaintext(client: TestClient, monkeypatch):
+    bootstrap_org_and_admin(client)
+    h = auth_headers(client)
+
+    # 1. Neither backend env nor org configured -> key_available=False (manual UI fallback)
+    r_none = client.get("/api/v1/settings/integrations/llm/key-status", params={"provider": "gemini"}, headers=h)
+    assert r_none.status_code == 200
+    assert r_none.json()["key_available"] is False
+    assert r_none.json()["source"] == "none"
+
+    # 2. Org saves its own encrypted OpenAI key (no OpenAI key in VPS env) -> org_encrypted returned
+    put_openai = client.put(
+        "/api/v1/settings/integrations/llm",
+        headers=h,
+        json={
+            "enabled": True,
+            "settings": {"provider": "openai", "model": "gpt-4o-mini"},
+            "secrets": {"api_key": "sk-CustomOrgKey4321"},
+        },
+    )
+    assert put_openai.status_code == 200
+    r_org = client.get("/api/v1/settings/integrations/llm/key-status", params={"provider": "openai"}, headers=h)
+    assert r_org.status_code == 200
+    assert r_org.json()["key_available"] is True
+    assert r_org.json()["source"] == "org_encrypted"
+    assert r_org.json()["masked_key"] == "sk-C••••••••4321"
+    assert "CustomOrgKey" not in r_org.json()["masked_key"]
+
+    # 3. Backend/VPS env configured for Gemini via GEMINI_API_KEY -> backend_env wins & clears stale org secret on switch
+    monkeypatch.setenv("GEMINI_API_KEY", "AIzaSySecretBackendKey9876")
+    from app.core.config import get_settings
+    from app.integrations.llm import generate_clinical_synthesis
+    import httpx
+
+    get_settings.cache_clear()
+    try:
+        r_env = client.get("/api/v1/settings/integrations/llm/key-status", params={"provider": "gemini"}, headers=h)
+        assert r_env.status_code == 200
+        body_env = r_env.json()
+        assert body_env["key_available"] is True
+        assert body_env["source"] == "backend_env"
+        assert body_env["masked_key"] == "AIza••••••••9876"
+        assert "SecretBackendKey" not in body_env["masked_key"]
+
+        # Switching org back to Gemini using backend env clears stale OpenAI org secret
+        put_gemini = client.put(
+            "/api/v1/settings/integrations/llm",
+            headers=h,
+            json={
+                "enabled": True,
+                "settings": {"provider": "gemini", "model": "gemini-2.0-flash", "use_backend_env": True},
+            },
+        )
+        assert put_gemini.status_code == 200
+
+        called: dict[str, str] = {}
+
+        class _FakeResp:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict:
+                return {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": '{"summary_en":"Deterministic sleep drift reviewed cleanly.","summary_ar":"تمت مراجعة انحراف النوم بشكل حتمي واضح.","contributing_signals":[],"missing_data_limitations":[],"confounder_notes":[],"recommended_follow_up_actions":[],"clinical_disclaimer":"Draft only for licensed clinician review."}'
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+
+        def fake_post(url, **kwargs):
+            called["url"] = url
+            called["key"] = (kwargs.get("params") or {}).get("key", "")
+            return _FakeResp()
+
+        monkeypatch.setattr(httpx, "post", fake_post)
+        res = generate_clinical_synthesis({"track": "core", "deterministic_risk_tier": "GREEN"}, org_override={"provider": "gemini", "model": "gemini-2.0-flash"})
+        assert res.status.value == "completed"
+        assert called["key"] == "AIzaSySecretBackendKey9876"
+    finally:
+        get_settings.cache_clear()

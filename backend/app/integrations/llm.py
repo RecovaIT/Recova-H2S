@@ -298,11 +298,17 @@ def generate_clinical_synthesis(
     """Invoke the configured LLM provider on de-identified Agent 4 context and validate schema + consistency."""
     s = settings or get_settings()
     provider = (org_override or {}).get("provider") or s.llm_provider
-    api_key = (org_override or {}).get("api_key") or s.llm_api_key
-    model = (org_override or {}).get("model") or s.llm_model
-    base_url = (org_override or {}).get("base_url") or s.llm_base_url
-    azure_dep = (org_override or {}).get("azure_deployment") or s.llm_azure_deployment
-    azure_ver = (org_override or {}).get("azure_api_version") or s.llm_azure_api_version
+    if provider == "none":
+        env_fallback = s.resolve_llm_env(None)
+        provider = env_fallback.get("provider") or "none"
+    else:
+        env_fallback = s.resolve_llm_env(provider)
+
+    api_key = (org_override or {}).get("api_key") or env_fallback.get("api_key") or (s.llm_api_key if s.llm_provider == provider else "")
+    model = (org_override or {}).get("model") or env_fallback.get("model") or ""
+    base_url = (org_override or {}).get("base_url") or env_fallback.get("base_url") or ""
+    azure_dep = (org_override or {}).get("azure_deployment") or env_fallback.get("azure_deployment") or ""
+    azure_ver = (org_override or {}).get("azure_api_version") or env_fallback.get("azure_api_version") or s.llm_azure_api_version
 
     if provider == "none" or not api_key:
         return SynthesisCallResult(

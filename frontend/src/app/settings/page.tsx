@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Building2, Plug, Shield } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { opsService } from "@/services/ops";
@@ -8,6 +8,7 @@ import type {
   CareFacility,
   InsurancePlan,
   IntegrationConfig,
+  LlmKeyStatus,
   ProgrammeRequest,
   ReferralPathway,
   Track,
@@ -24,6 +25,14 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
 
+const DEFAULT_LLM_MODELS: Record<string, string> = {
+  gemini: "gemini-2.0-flash",
+  openai: "gpt-4o-mini",
+  anthropic: "claude-3-5-sonnet-latest",
+  azure_openai: "gpt-4o",
+  none: "",
+};
+
 export default function SettingsPage() {
   const { session, hasPermission, refreshSession } = useAuth();
   const { pushToast } = useToast();
@@ -39,12 +48,16 @@ export default function SettingsPage() {
   const [reqJustification, setReqJustification] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // LLM config state
-  const [llmProvider, setLlmProvider] = useState("openai");
-  const [llmModel, setLlmModel] = useState("gpt-4o-mini");
+  // LLM config state (Gemini selected by default)
+  const [llmProvider, setLlmProvider] = useState("gemini");
+  const [llmModel, setLlmModel] = useState(DEFAULT_LLM_MODELS.gemini);
   const [llmBaseUrl, setLlmBaseUrl] = useState("");
   const [llmApiKey, setLlmApiKey] = useState("");
+  const [llmKeyMasked, setLlmKeyMasked] = useState(false);
+  const [llmKeyStatus, setLlmKeyStatus] = useState<LlmKeyStatus | null>(null);
   const [llmEnabled, setLlmEnabled] = useState(true);
+  const llmKeyMaskedRef = useRef(false);
+  llmKeyMaskedRef.current = llmKeyMasked;
 
   // Insurance plan create
   const [planCode, setPlanCode] = useState("");
@@ -86,22 +99,81 @@ export default function SettingsPage() {
     return () => clearTimeout(timer);
   }, [loadSettings]);
 
+  const fetchLlmKeyFromBackend = useCallback(async (provider: string) => {
+    if (!canManage || provider === "none") {
+      setLlmKeyStatus(null);
+      if (llmKeyMaskedRef.current) {
+        setLlmApiKey("");
+        setLlmKeyMasked(false);
+      }
+      return;
+    }
+    try {
+      const status = await opsService.getLlmKeyStatus(provider);
+      setLlmKeyStatus(status);
+      if (status.key_available && status.masked_key) {
+        setLlmApiKey(status.masked_key);
+        setLlmKeyMasked(true);
+        if (status.default_model) {
+          setLlmModel((prev) =>
+            !prev.trim() || Object.values(DEFAULT_LLM_MODELS).includes(prev) ? status.default_model! : prev
+          );
+        }
+        if (status.default_base_url) {
+          setLlmBaseUrl((prev) => prev || status.default_base_url || "");
+        }
+      } else {
+        if (llmKeyMaskedRef.current) {
+          setLlmApiKey("");
+        }
+        setLlmKeyMasked(false);
+      }
+    } catch {
+      setLlmKeyStatus(null);
+      if (llmKeyMaskedRef.current) {
+        setLlmApiKey("");
+      }
+      setLlmKeyMasked(false);
+    }
+  }, [canManage]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void fetchLlmKeyFromBackend(llmProvider);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [llmProvider, fetchLlmKeyFromBackend]);
+
+  const handleProviderChange = (nextProvider: string) => {
+    setLlmProvider(nextProvider);
+    if (llmKeyMaskedRef.current) {
+      setLlmApiKey("");
+      setLlmKeyMasked(false);
+    }
+    if (Object.values(DEFAULT_LLM_MODELS).includes(llmModel) || !llmModel.trim()) {
+      setLlmModel(DEFAULT_LLM_MODELS[nextProvider] || "");
+    }
+  };
+
   const handleSaveLlm = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     try {
+      const usingBackendEnv = llmKeyStatus?.source === "backend_env" && llmKeyStatus.key_available;
+      const manualKey = usingBackendEnv || llmKeyMasked ? "" : llmApiKey.trim();
       await opsService.upsertIntegration("llm", {
         enabled: llmEnabled,
         settings: {
           provider: llmProvider,
           model: llmModel.trim(),
           base_url: llmBaseUrl.trim() || undefined,
+          use_backend_env: usingBackendEnv,
         },
-        secrets: llmApiKey.trim() ? { api_key: llmApiKey.trim() } : undefined,
+        secrets: manualKey ? { api_key: manualKey } : undefined,
       });
-      setLlmApiKey("");
       pushToast("LLM provider settings saved encrypted", "success");
       await loadSettings();
+      await fetchLlmKeyFromBackend(llmProvider);
     } catch (err) {
       pushToast("Save failed", "error", err instanceof Error ? err.message : undefined);
     } finally {
@@ -248,28 +320,71 @@ export default function SettingsPage() {
                     <form onSubmit={handleSaveLlm} className="space-y-3">
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
-                          <Label>Provider</Label>
-                          <Select value={llmProvider} onChange={(e) => setLlmProvider(e.target.value)}>
+                          <Label htmlFor="llm-provider">Provider</Label>
+                          <Select
+                            id="llm-provider"
+                            value={llmProvider}
+                            onChange={(e) => handleProviderChange(e.target.value)}
+                          >
+                            <option value="gemini">Google Gemini</option>
                             <option value="openai">OpenAI</option>
                             <option value="azure_openai">Azure OpenAI</option>
                             <option value="anthropic">Anthropic Claude</option>
-                            <option value="gemini">Google Gemini</option>
                             <option value="none">Disabled</option>
                           </Select>
                         </div>
                         <div className="space-y-1">
-                          <Label>Model</Label>
-                          <Input value={llmModel} onChange={(e) => setLlmModel(e.target.value)} />
+                          <Label htmlFor="llm-model">Model</Label>
+                          <Input id="llm-model" value={llmModel} onChange={(e) => setLlmModel(e.target.value)} />
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <Label>Custom Endpoint / Base URL (Optional)</Label>
-                        <Input value={llmBaseUrl} onChange={(e) => setLlmBaseUrl(e.target.value)} placeholder="https://api.openai.com/v1" />
+                        <Label htmlFor="llm-base-url">Custom Endpoint / Base URL (Optional)</Label>
+                        <Input id="llm-base-url" value={llmBaseUrl} onChange={(e) => setLlmBaseUrl(e.target.value)} placeholder="https://api.openai.com/v1" />
                       </div>
-                      <div className="space-y-1">
-                        <Label>API Key (leave blank to keep existing secret)</Label>
-                        <Input type="password" value={llmApiKey} onChange={(e) => setLlmApiKey(e.target.value)} placeholder="sk-..." />
-                      </div>
+                      {llmProvider !== "none" &&
+                        (llmKeyStatus?.source === "backend_env" && llmKeyStatus.key_available ? (
+                          <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-950">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-semibold">
+                                API Key Connected Automatically from Backend (VPS)
+                              </span>
+                              <Badge variant="outline" className="border-emerald-300 text-[10px] text-emerald-800">
+                                Server Env Active
+                              </Badge>
+                            </div>
+                            <p className="mt-1 text-[11px] text-emerald-800">
+                              Backend resolved credentials for <strong className="uppercase">{llmProvider}</strong>{" "}
+                              ({llmKeyStatus.masked_key || "••••••••"}) securely on the server. Manual key entry is hidden for security.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <Label htmlFor="llm-api-key">API Key (leave blank to keep existing secret)</Label>
+                              {llmKeyStatus?.source === "org_encrypted" && llmKeyStatus.key_available && (
+                                <Badge variant="outline" className="text-[10px]">
+                                  Encrypted org key stored ({llmKeyStatus.masked_key})
+                                </Badge>
+                              )}
+                            </div>
+                            <Input
+                              id="llm-api-key"
+                              type="password"
+                              value={llmKeyMasked ? "" : llmApiKey}
+                              onChange={(e) => {
+                                setLlmKeyMasked(false);
+                                setLlmApiKey(e.target.value);
+                              }}
+                              placeholder={llmProvider === "gemini" ? "AIza..." : "sk-..."}
+                            />
+                            {llmKeyStatus && !llmKeyStatus.key_available && (
+                              <p className="text-[11px] text-amber-700">
+                                No API key found in backend (VPS) env for {llmProvider} — enter your key manually above.
+                              </p>
+                            )}
+                          </div>
+                        ))}
                       <label className="flex items-center gap-2 text-xs cursor-pointer">
                         <input type="checkbox" checked={llmEnabled} onChange={(e) => setLlmEnabled(e.target.checked)} />
                         Enable Agent 5 synthesis for consented patients

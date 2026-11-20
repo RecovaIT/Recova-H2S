@@ -376,6 +376,15 @@ class IntegrationConfigOut(BaseModel):
     last_test_result: dict[str, Any] | None = None
 
 
+class LlmKeyStatusOut(BaseModel):
+    provider: str
+    key_available: bool
+    source: str
+    masked_key: str | None = None
+    default_model: str | None = None
+    default_base_url: str | None = None
+
+
 class BenchmarkRunCreate(BaseModel):
     tracks: list[Track] = Field(default_factory=lambda: [Track.CORE, Track.LOOP, Track.NEURO, Track.WORKSAFE])
     run_async: bool = False
