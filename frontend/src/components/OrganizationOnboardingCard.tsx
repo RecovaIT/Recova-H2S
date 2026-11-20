@@ -240,7 +240,7 @@ export function OrganizationOnboardingCard({ mode, initialProgramme = "core" }: 
               <span className="text-xs font-bold uppercase tracking-wider">
                 {isBootstrap
                   ? tr("Initial Platform Setup", "الإعداد الأولي للمنصة")
-                  : tr("Health Center Onboarding", "تسجيل مركز صحي جديد")}
+                  : tr("Organisation sign up", "تسجيل منشأة جديدة")}
               </span>
             </div>
             <span className="rounded-full bg-[#d7e6ed] px-2.5 py-0.5 text-[11px] font-semibold text-[#004263]">
@@ -250,12 +250,12 @@ export function OrganizationOnboardingCard({ mode, initialProgramme = "core" }: 
           <CardTitle className="text-xl text-[#011621]">
             {isBootstrap
               ? tr("Initialise Recova Engine & Primary Facility", "تهيئة محرك ريكوفا والمنشأة الرئيسية")
-              : tr("Register a New Health Center", "تسجيل مركز صحي جديد")}
+              : tr("Create your Recova workspace", "أنشئ مساحة عمل منشأتك في ريكوفا")}
           </CardTitle>
           <CardDescription className="text-[#5a7d93]">
             {tr(
-              "Each health center selects one primary Recova sub-engine at signup. Additional programmes can be requested later from Settings.",
-              "يختار كل مركز صحي برنامجًا أساسيًا واحدًا عند التسجيل، ويمكن طلب برامج إضافية لاحقًا من الإعدادات."
+              "Choose one programme for your organisation. Patients and workers join through an invitation from their facility.",
+              "اختر برنامجًا واحدًا لمنشأتك. ينضم المرضى والعاملون عبر دعوة من منشأتهم."
             )}
           </CardDescription>
 

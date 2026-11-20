@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { LanguageProvider } from "@/hooks/useLanguage";
 import LoginPage from "@/app/login/page";
+import SignupPage from "@/app/signup/page";
 import { OrganizationOnboardingCard } from "@/components/OrganizationOnboardingCard";
 import { AuthGuard } from "@/components/AuthGuard";
 import { authService } from "@/services/auth";
@@ -13,6 +14,7 @@ const replaceMock = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: replaceMock, push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams("programme=loop"),
 }));
 
 vi.mock("@/services/auth", () => ({
@@ -34,24 +36,126 @@ describe("LoginPage & Tenant Onboarding", () => {
     vi.mocked(authService.me).mockRejectedValue(new Error("Unauthenticated"));
   });
 
-  it("renders Add New Organisation button linking to /register-organization when logged out", async () => {
+  it("renders Sign up linking to /signup when logged out", async () => {
     render(
       <AuthProvider>
         <LoginPage />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     await waitFor(() => {
-      const addOrgLink = screen.getByRole("link", { name: /add new organisation/i });
+      const addOrgLink = screen.getByRole("link", { name: /sign up/i });
       expect(addOrgLink).toBeInTheDocument();
-      expect(addOrgLink).toHaveAttribute("href", "/register-organization");
+      expect(addOrgLink).toHaveAttribute("href", "/signup");
     });
   });
 
-  it("opens the privacy-protected WorkSafe workspace for supervisors",async()=>{
-    vi.mocked(authService.me).mockResolvedValue({user:{id:"sup",email:"sup@example.com",full_name:"Supervisor",is_active:true,is_platform_admin:false,preferred_language:"en",created_at:"2026-11-19"},active_organization:{id:"yard",name:"Yard",slug:"yard",org_type:"employer",enabled_tracks:["worksafe"],is_active:true,settings:{},created_at:"2026-11-19"},role:"supervisor",permissions:["org:read","workforce:read_aggregate"],tracks:["worksafe"],memberships:[]});
-    render(<AuthProvider><LoginPage/></AuthProvider>);
-    await waitFor(()=>expect(replaceMock).toHaveBeenCalledWith("/worksafe"));
+  it("keeps sign-in available when the platform has no operator", async () => {
+    vi.mocked(authService.status).mockResolvedValue({ needs_bootstrap: true });
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(authService.me).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Sign In" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Sign up" })).toHaveAttribute(
+      "href",
+      "/signup",
+    );
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it("shows normal signup even before a platform operator has been provisioned", async () => {
+    vi.mocked(authService.status).mockResolvedValue({ needs_bootstrap: true });
+    render(
+      <AuthProvider>
+        <SignupPage />
+      </AuthProvider>,
+    );
+    expect(
+      await screen.findByText("Create your Recova workspace"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Production operator setup secret"),
+    ).not.toBeInTheDocument();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it("sends unauthenticated protected-page visitors to sign-in even when operator setup is pending", async () => {
+    vi.mocked(authService.status).mockResolvedValue({ needs_bootstrap: true });
+    render(
+      <AuthProvider>
+        <AuthGuard>
+          <p>Private workspace</p>
+        </AuthGuard>
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/login"));
+    expect(replaceMock).not.toHaveBeenCalledWith("/bootstrap");
+    expect(screen.queryByText("Private workspace")).not.toBeInTheDocument();
+  });
+
+  it("keeps an existing session when the optional setup-status request fails", async () => {
+    vi.mocked(authService.status).mockRejectedValue(
+      new Error("Status unavailable"),
+    );
+    vi.mocked(authService.me).mockResolvedValue({
+      user: {
+        id: "p",
+        email: "patient@example.com",
+        full_name: "Patient",
+        is_active: true,
+        is_platform_admin: false,
+        preferred_language: "en",
+        created_at: "2026-11-20",
+      },
+      active_organization: null,
+      role: "patient",
+      permissions: ["portal:self"],
+      tracks: [],
+      memberships: [],
+    });
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/portal"));
+  });
+
+  it("opens the privacy-protected WorkSafe workspace for supervisors", async () => {
+    vi.mocked(authService.me).mockResolvedValue({
+      user: {
+        id: "sup",
+        email: "sup@example.com",
+        full_name: "Supervisor",
+        is_active: true,
+        is_platform_admin: false,
+        preferred_language: "en",
+        created_at: "2026-11-19",
+      },
+      active_organization: {
+        id: "yard",
+        name: "Yard",
+        slug: "yard",
+        org_type: "employer",
+        enabled_tracks: ["worksafe"],
+        is_active: true,
+        settings: {},
+        created_at: "2026-11-19",
+      },
+      role: "supervisor",
+      permissions: ["org:read", "workforce:read_aggregate"],
+      tracks: ["worksafe"],
+      memberships: [],
+    });
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/worksafe"));
   });
 
   it("submits OrganizationOnboardingCard in register mode and redirects to /dashboard", async () => {
@@ -85,24 +189,43 @@ describe("LoginPage & Tenant Onboarding", () => {
     render(
       <AuthProvider>
         <OrganizationOnboardingCard mode="register" initialProgramme="loop" />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
-    await user.type(screen.getByLabelText(/organisation name/i), "Dubai Care Clinic");
-    expect(screen.getByLabelText(/tenant slug/i)).toHaveValue("dubai-care-clinic");
-    await user.selectOptions(screen.getByLabelText(/organisation type/i), "clinic");
+    await user.type(
+      screen.getByLabelText(/organisation name/i),
+      "Dubai Care Clinic",
+    );
+    expect(screen.getByLabelText(/tenant slug/i)).toHaveValue(
+      "dubai-care-clinic",
+    );
+    await user.selectOptions(
+      screen.getByLabelText(/organisation type/i),
+      "clinic",
+    );
     await user.type(screen.getByLabelText(/full name/i), "Dr. Tariq Saeed");
-    await user.type(screen.getByLabelText(/admin email/i), "admin@dubai-care.ae");
+    await user.type(
+      screen.getByLabelText(/admin email/i),
+      "admin@dubai-care.ae",
+    );
     await user.type(screen.getByLabelText(/^password/i), "DubaiClinicPass123!");
     await user.click(screen.getByRole("button", { name: /continue/i }));
-    expect(screen.getByRole("button", { name: /recova loop/i })).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("button", { name: /recova loop/i }),
+    ).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: /continue/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
-    expect(screen.getByRole("checkbox", { name: /I confirm the shared/i })).not.toBeChecked();
-    await user.click(screen.getByRole("checkbox", { name: /I confirm the shared/i }));
+    expect(
+      screen.getByRole("checkbox", { name: /I confirm the shared/i }),
+    ).not.toBeChecked();
+    await user.click(
+      screen.getByRole("checkbox", { name: /I confirm the shared/i }),
+    );
     await user.click(screen.getByRole("button", { name: /continue/i }));
     expect(authService.registerOrganization).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: /create organisation & sign in/i }));
+    await user.click(
+      screen.getByRole("button", { name: /create organisation & sign in/i }),
+    );
 
     await waitFor(() => {
       expect(authService.registerOrganization).toHaveBeenCalledWith(
@@ -113,7 +236,7 @@ describe("LoginPage & Tenant Onboarding", () => {
           organization_slug: "dubai-care-clinic",
           org_type: "clinic",
           admin_email: "admin@dubai-care.ae",
-        })
+        }),
       );
       expect(replaceMock).toHaveBeenCalledWith("/dashboard");
     });
@@ -173,9 +296,18 @@ describe("LoginPage & Tenant Onboarding", () => {
       const [staleInput, setStaleInput] = useState("org-a-draft");
       return (
         <div>
-          <span data-testid="active-org">{session?.active_organization?.slug}</span>
-          <input aria-label="Draft" value={staleInput} onChange={(e) => setStaleInput(e.target.value)} />
-          <button type="button" onClick={() => void switchOrganization("org-b")}>
+          <span data-testid="active-org">
+            {session?.active_organization?.slug}
+          </span>
+          <input
+            aria-label="Draft"
+            value={staleInput}
+            onChange={(e) => setStaleInput(e.target.value)}
+          />
+          <button
+            type="button"
+            onClick={() => void switchOrganization("org-b")}
+          >
             Switch to B
           </button>
         </div>
@@ -187,17 +319,21 @@ describe("LoginPage & Tenant Onboarding", () => {
         <AuthGuard requiredPermission="org:read">
           <TenantProbe />
         </AuthGuard>
-      </AuthProvider>
+      </AuthProvider>,
     );
 
-    await waitFor(() => expect(screen.getByTestId("active-org")).toHaveTextContent("org-a"));
+    await waitFor(() =>
+      expect(screen.getByTestId("active-org")).toHaveTextContent("org-a"),
+    );
     const input = screen.getByLabelText("Draft");
     await user.clear(input);
     await user.type(input, "modified-in-a");
     expect(input).toHaveValue("modified-in-a");
 
     await user.click(screen.getByRole("button", { name: /switch to b/i }));
-    await waitFor(() => expect(screen.getByTestId("active-org")).toHaveTextContent("org-b"));
+    await waitFor(() =>
+      expect(screen.getByTestId("active-org")).toHaveTextContent("org-b"),
+    );
     expect(screen.getByLabelText("Draft")).toHaveValue("org-a-draft");
   });
 
@@ -210,9 +346,11 @@ describe("LoginPage & Tenant Onboarding", () => {
         <AuthProvider>
           <LoginPage />
         </AuthProvider>
-      </LanguageProvider>
+      </LanguageProvider>,
     );
-    const toggle = await screen.findByRole("button", { name: "Toggle language" });
+    const toggle = await screen.findByRole("button", {
+      name: "Toggle language",
+    });
     await user.click(toggle);
     expect(screen.getByText("مرحبًا بك في ريكوفا")).toBeInTheDocument();
     expect(document.documentElement).toHaveAttribute("dir", "rtl");

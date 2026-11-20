@@ -238,11 +238,11 @@ describe("Root-level i18n dictionary, navbars, patterns, and live watcher", () =
       </LanguageProvider>
     );
 
-    expect(screen.getByText("Track Not Enabled for Role/Org")).toBeInTheDocument();
+    expect(screen.getByText("Programme unavailable")).toBeInTheDocument();
     expect(screen.getByText("Judge Demo: Recova Recovery Centre")).toBeInTheDocument();
     await user.click(screen.getAllByRole("button", { name: "Toggle language" })[0]);
 
-    expect(screen.getByText("المسار غير مفعّل للدور أو المنشأة")).toBeInTheDocument();
+    expect(screen.getByText("البرنامج غير متاح")).toBeInTheDocument();
     expect(screen.getByText("عرض التحكيم: مركز ريكوفا للتعافي")).toBeInTheDocument();
     expect(screen.getByText("تراجع تدريجي")).toBeInTheDocument();
     expect(screen.getByText("بيانات ناقصة")).toBeInTheDocument();
@@ -250,7 +250,7 @@ describe("Root-level i18n dictionary, navbars, patterns, and live watcher", () =
     expect(screen.getByRole("option", { name: "عرض التحكيم: عيادة ريكوفا لوب · لوب" })).toBeInTheDocument();
 
     await user.click(screen.getAllByRole("button", { name: "Toggle language" })[0]);
-    expect(screen.getByText("Track Not Enabled for Role/Org")).toBeInTheDocument();
+    expect(screen.getByText("Programme unavailable")).toBeInTheDocument();
     expect(screen.getByText("Judge Demo: Recova Recovery Centre")).toBeInTheDocument();
     expect(screen.getByText("gradual_decline")).toBeInTheDocument();
   });

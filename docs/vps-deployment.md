@@ -114,7 +114,7 @@ curl -fsS https://h2s.recovahq.com/api/v1/auth/status
 # Expected: {"needs_bootstrap":true}  (until initial platform/organisation setup)
 ```
 
-Before initializing production, set a private random `BOOTSTRAP_SETUP_TOKEN` of at least 32 characters in `.env.vps` and recreate the backend. Generate it with `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`. Keep it private. The setup script generates it for a new environment file; existing files need this setting added manually. Enter it on `/bootstrap` when creating the intended platform operator. Clear the token and restart the backend after successful initialization. Public organization registration stays blocked until this step finishes.
+Before initializing production, set a private random `BOOTSTRAP_SETUP_TOKEN` of at least 32 characters in `.env.vps` and recreate the backend. Generate it with `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`. Keep it private. The setup script generates it for a new environment file; existing files need this setting added manually. Enter it on `/operator/setup` when creating the intended platform operator. Clear the token and restart the backend after successful initialization. Public facility signup at `/signup` is independent of operator setup and never creates a platform administrator. The setup status flag describes operator provisioning, not whether customer sign-in is available.
 
 Synthetic judge fixtures bypass real invitation delivery and are not proof of onboarding or production readiness. Only optionally load them in an explicitly designated demonstration environment:
 ```bash

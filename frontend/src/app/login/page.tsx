@@ -8,14 +8,21 @@ import { RecovaMark } from "@/components/RecovaMark";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useAuth } from "@/hooks/useAuth";
 import { useLanguage } from "@/hooks/useLanguage";
+import { workspacePath } from "@/lib/auth-routing";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { session, needsBootstrap, loading, login } = useAuth();
+  const { session, loading, login } = useAuth();
   const { tr } = useLanguage();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -25,22 +32,15 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (loading) return;
-    if (needsBootstrap) {
-      router.replace("/bootstrap");
-    } else if (session) {
+    if (session) {
       const next = new URLSearchParams(window.location.search).get("next");
-      if (next?.startsWith("/accept-invitation?")) { router.replace(next); return; }
-      if (session.role === "patient") {
-        router.replace("/portal");
-      } else if (session.role === "authority_user") {
-        router.replace("/authority");
-      } else if (session.role === "supervisor") {
-        router.replace("/worksafe");
-      } else {
-        router.replace("/dashboard");
+      if (next?.startsWith("/accept-invitation?")) {
+        router.replace(next);
+        return;
       }
+      router.replace(workspacePath(session.role));
     }
-  }, [loading, needsBootstrap, session, router]);
+  }, [loading, session, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,16 +49,11 @@ export default function LoginPage() {
     try {
       const result = await login({ email: email.trim(), password });
       const next = new URLSearchParams(window.location.search).get("next");
-      if (next?.startsWith("/accept-invitation?")) { router.replace(next); return; }
-      if (result.role === "patient") {
-        router.replace("/portal");
-      } else if (result.role === "authority_user") {
-        router.replace("/authority");
-      } else if (result.role === "supervisor") {
-        router.replace("/worksafe");
-      } else {
-        router.replace("/dashboard");
+      if (next?.startsWith("/accept-invitation?")) {
+        router.replace(next);
+        return;
       }
+      router.replace(workspacePath(result.role));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed");
     } finally {
@@ -74,11 +69,13 @@ export default function LoginPage() {
           <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-xl bg-teal-700 text-[#aeff9a]">
             <RecovaMark size={28} />
           </div>
-          <CardTitle className="text-xl">{tr("Welcome to Recova", "مرحبًا بك في ريكوفا")}</CardTitle>
+          <CardTitle className="text-xl">
+            {tr("Welcome to Recova", "مرحبًا بك في ريكوفا")}
+          </CardTitle>
           <CardDescription>
             {tr(
-              "Sign in with your clinical or organisational credentials.",
-              "سجّل الدخول باستخدام بيانات اعتمادك السريرية أو المؤسسية."
+              "Sign in to your Recova account.",
+              "سجّل الدخول إلى حسابك في ريكوفا.",
             )}
           </CardDescription>
         </CardHeader>
@@ -87,7 +84,9 @@ export default function LoginPage() {
             {error && <Alert variant="danger">{error}</Alert>}
 
             <div className="space-y-1">
-              <Label htmlFor="login-email">{tr("Email Address", "البريد الإلكتروني")}</Label>
+              <Label htmlFor="login-email">
+                {tr("Email Address", "البريد الإلكتروني")}
+              </Label>
               <Input
                 id="login-email"
                 type="email"
@@ -95,12 +94,14 @@ export default function LoginPage() {
                 autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="clinician@hospital.ae"
+                placeholder="you@example.com"
               />
             </div>
 
             <div className="space-y-1">
-              <Label htmlFor="login-password">{tr("Password", "كلمة المرور")}</Label>
+              <Label htmlFor="login-password">
+                {tr("Password", "كلمة المرور")}
+              </Label>
               <div className="relative">
                 <Input
                   id="login-password"
@@ -118,36 +119,45 @@ export default function LoginPage() {
                   aria-label={showPassword ? "Hide input" : "Reveal input"}
                   title={showPassword ? "Hide input" : "Reveal input"}
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
                 </button>
               </div>
             </div>
 
             <Button type="submit" disabled={submitting} className="w-full">
               <Lock className="h-4 w-4" />
-              {submitting ? tr("Authenticating...", "جارٍ التحقق...") : tr("Sign In", "تسجيل الدخول")}
+              {submitting
+                ? tr("Authenticating...", "جارٍ التحقق...")
+                : tr("Sign In", "تسجيل الدخول")}
             </Button>
 
             <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
-              <Link href="/forgot-password" className="text-teal-700 hover:underline">
+              <Link
+                href="/forgot-password"
+                className="text-teal-700 hover:underline"
+              >
                 {tr("Forgot password?", "هل نسيت كلمة المرور؟")}
               </Link>
-              <span>{tr("Zero hardcoded demo credentials", "لا توجد بيانات دخول افتراضية")}</span>
+              <span>{tr("Private account access", "دخول خاص إلى حسابك")}</span>
             </div>
 
             <div className="border-t border-slate-200 pt-4">
               <p className="mb-2 text-center text-xs text-slate-500">
                 {tr(
                   "Onboarding a new clinic, hospital, or employer workspace?",
-                  "هل تقوم بتسجيل عيادة أو مستشفى أو جهة عمل جديدة؟"
+                  "هل تقوم بتسجيل عيادة أو مستشفى أو جهة عمل جديدة؟",
                 )}
               </p>
               <Link
-                href="/register-organization"
+                href="/signup"
                 className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600"
               >
                 <Building2 className="h-4 w-4 text-teal-700" />
-                {tr("Add New Organisation", "إضافة منشأة جديدة")}
+                {tr("Sign up", "إنشاء حساب")}
               </Link>
             </div>
           </form>

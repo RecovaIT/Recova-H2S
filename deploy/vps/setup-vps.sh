@@ -91,8 +91,8 @@ else
   if ! grep -q '^BOOTSTRAP_SETUP_TOKEN=' "${ENV_FILE}"; then
     BOOTSTRAP_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
     printf '\nBOOTSTRAP_SETUP_TOKEN=%s\n' "${BOOTSTRAP_TOKEN}" >> "${ENV_FILE}"
-    echo "    Added missing BOOTSTRAP_SETUP_TOKEN to ${ENV_FILE} for protected /bootstrap setup."
-    echo "    Inspect with: grep '^BOOTSTRAP_SETUP_TOKEN=' ${ENV_FILE} (clear after /bootstrap finishes)."
+    echo "    Added missing BOOTSTRAP_SETUP_TOKEN to ${ENV_FILE} for protected /operator/setup."
+    echo "    Inspect with: grep '^BOOTSTRAP_SETUP_TOKEN=' ${ENV_FILE} (clear after /operator/setup finishes)."
   fi
 fi
 

@@ -249,7 +249,11 @@ def _session_payload(
 
 
 def needs_bootstrap(db: Session) -> bool:
-    return (db.scalar(select(func.count(User.id))) or 0) == 0
+    """Operator provisioning is independent of normal facility registration."""
+    return (
+        db.scalar(select(func.count(User.id)).where(User.is_platform_admin.is_(True)))
+        or 0
+    ) == 0
 
 
 def _create_org_and_admin_session(
@@ -413,7 +417,7 @@ def bootstrap_platform(
     ip_address: str | None = None,
     user_agent: str | None = None,
 ) -> tuple[SessionResponse, str, str]:
-    """One-time platform initialisation when zero users exist."""
+    """Provision the first platform operator, with a production setup secret."""
     settings = get_settings()
     limiter.check(f'bootstrap:{ip_address or "unknown"}', 5, 60)
     if settings.environment == "production":
@@ -448,10 +452,6 @@ def register_organization(
     """Self-service tenant organisation onboarding from the public login screen."""
     s = get_settings()
     db.execute(text("SELECT pg_advisory_xact_lock(738490112)"))
-    if s.environment == "production" and needs_bootstrap(db):
-        raise Forbidden(
-            "The deployment owner must initialize the platform before public registration opens."
-        )
     limiter.check(
         f"register_org:{ip_address or 'unknown'}", s.rate_limit_login_per_minute, 60.0
     )

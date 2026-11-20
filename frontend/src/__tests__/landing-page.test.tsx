@@ -55,7 +55,7 @@ describe("Public Recova landing page", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Choose Recova WorkSafe" }),
-    ).toHaveAttribute("href", "/register-organization?programme=worksafe");
+    ).toHaveAttribute("href", "/signup?programme=worksafe");
   });
   it("opens and dismisses the mobile menu with Escape and restores focus", async () => {
     const user = userEvent.setup();

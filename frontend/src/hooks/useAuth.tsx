@@ -1,8 +1,18 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
 import { ApiError } from "@/lib/api";
-import { authService, type BootstrapPayload, type LoginPayload } from "@/services/auth";
+import {
+  authService,
+  type BootstrapPayload,
+  type LoginPayload,
+} from "@/services/auth";
 import type { SessionResponse } from "@/types/recova";
 
 interface AuthContextValue {
@@ -31,23 +41,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadSession = useCallback(async () => {
     try {
-      const statusRes = await authService.status();
-      setNeedsBootstrap(Boolean(statusRes.needs_bootstrap));
-      if (statusRes.needs_bootstrap) {
+      const [status, current] = await Promise.allSettled([
+        authService.status(),
+        authService.me(),
+      ]);
+      setNeedsBootstrap(
+        status.status === "fulfilled" && Boolean(status.value.needs_bootstrap),
+      );
+      if (current.status === "fulfilled") {
+        setSession(current.value);
+        setError(null);
+      } else {
         setSession(null);
-        setError(null);
-        return;
-      }
-      try {
-        const me = await authService.me();
-        setSession(me);
-        setError(null);
-      } catch (err) {
+        const err = current.reason;
         if (err instanceof ApiError && err.status === 401) {
           setSession(null);
           setError(null);
         } else {
-          setError(err instanceof Error ? err.message : "Failed to verify session");
+          setError(
+            err instanceof Error ? err.message : "Failed to verify session",
+          );
         }
       }
     } catch (err) {
@@ -71,7 +84,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(async (payload: LoginPayload) => {
     const res = await authService.login(payload);
     setSession(res);
-    setNeedsBootstrap(false);
     setError(null);
     return res;
   }, []);
@@ -84,13 +96,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return res;
   }, []);
 
-  const registerOrganization = useCallback(async (payload: BootstrapPayload) => {
-    const res = await authService.registerOrganization(payload);
-    setSession(res);
-    setNeedsBootstrap(false);
-    setError(null);
-    return res;
-  }, []);
+  const registerOrganization = useCallback(
+    async (payload: BootstrapPayload) => {
+      const res = await authService.registerOrganization(payload);
+      setSession(res);
+      setError(null);
+      return res;
+    },
+    [],
+  );
 
   const logout = useCallback(async () => {
     try {
@@ -111,7 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!session) return false;
       return session.permissions.includes(perm);
     },
-    [session]
+    [session],
   );
 
   const hasTrack = useCallback(
@@ -119,7 +133,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!session) return false;
       return session.tracks.includes(track);
     },
-    [session]
+    [session],
   );
 
   return (

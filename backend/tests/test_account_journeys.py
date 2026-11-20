@@ -313,7 +313,7 @@ def test_expired_links_are_not_sent_and_transport_failures_schedule_retry(
         db.commit()
 
 
-def test_production_bootstrap_requires_operator_secret_and_blocks_first_public_signup(
+def test_production_signup_is_independent_and_operator_setup_stays_protected(
     client, monkeypatch
 ):
     settings = get_settings()
@@ -330,14 +330,38 @@ def test_production_bootstrap_requires_operator_secret_and_blocks_first_public_s
         "enabled_tracks": ["core"],
     }
     assert client.post("/api/v1/auth/bootstrap", json=body).status_code == 403
-    assert (
-        client.post("/api/v1/auth/register-organization", json=body).status_code == 403
+    signup = client.post(
+        "/api/v1/auth/register-organization",
+        json={
+            **body,
+            "is_platform_admin": True,
+            "role": "platform_admin",
+            "bootstrap_setup_token": secret,
+        },
     )
-    with SessionLocal() as db:
-        assert db.scalar(select(User.id)) is None
+    assert signup.status_code == 201, signup.text
+    assert signup.json()["user"]["is_platform_admin"] is False
+    assert signup.json()["role"] == "org_admin"
+    assert client.get("/api/v1/auth/me").status_code == 200
+    assert client.get("/api/v1/auth/status").json()["needs_bootstrap"] is True
+    assert client.get("/api/v1/reports/platform-overview").status_code == 403
+    post(client, "/auth/logout")
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            json={"email": body["admin_email"], "password": body["admin_password"]},
+        ).status_code
+        == 200
+    )
+    body.update(
+        organization_name="Platform Operations",
+        organization_slug="platform-operations",
+        admin_email="platform@operator.example.com",
+    )
     body["bootstrap_setup_token"] = secret
     response = client.post("/api/v1/auth/bootstrap", json=body)
     assert response.status_code == 201, response.text
     assert response.json()["user"]["is_platform_admin"] is True
     assert secret not in response.text
+    assert client.get("/api/v1/auth/status").json()["needs_bootstrap"] is False
     assert client.post("/api/v1/auth/bootstrap", json=body).status_code == 409

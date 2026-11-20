@@ -548,7 +548,7 @@ export default function HomePage() {
             <div className={styles.heroActions}>
               <Link
                 className={styles.primaryButton}
-                href="/register-organization"
+                href="/signup"
               >
                 Create a facility workspace <ArrowUpRight size={18} />
               </Link>
@@ -590,7 +590,7 @@ export default function HomePage() {
           </nav>
           <nav aria-label="Footer access links">
             <span>YOUR NEXT STEP</span>
-            <Link href="/register-organization">Create a workspace</Link>
+            <Link href="/signup">Create a workspace</Link>
             <Link href="/login">Patient & team sign in</Link>
             <a href="mailto:info@recovahq.com">info@recovahq.com</a>
           </nav>

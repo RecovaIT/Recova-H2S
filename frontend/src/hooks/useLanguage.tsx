@@ -193,8 +193,10 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
           window.localStorage.getItem(STORAGE_KEY) ||
           window.localStorage.getItem(PORTAL_STORAGE_KEY);
         if (saved === "ar") {
-          setLangState("ar");
-          applyDocumentDirection("ar");
+          queueMicrotask(() => {
+            setLangState("ar");
+            applyDocumentDirection("ar");
+          });
         }
       } catch {
         // Ignore storage access errors

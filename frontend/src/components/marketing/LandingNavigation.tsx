@@ -44,7 +44,7 @@ export function LandingNavigation() {
           <Link className={styles.signIn} href={session ? workspace : "/login"}>
             {session ? tr("Open workspace", "افتح مساحة العمل") : tr("Sign in", "تسجيل الدخول")}
           </Link>
-          <Link href="/register-organization" className={styles.navCta}>
+          <Link href="/signup" className={styles.navCta}>
             {tr("Get started", "ابدأ الآن")} <ArrowUpRight size={16} aria-hidden="true" />
           </Link>
         </div>
@@ -93,7 +93,7 @@ export function LandingNavigation() {
           <Link href={session ? workspace : "/login"}>
             {session ? tr("Open workspace", "افتح مساحة العمل") : tr("Sign in", "تسجيل الدخول")}
           </Link>
-          <Link href="/register-organization">
+          <Link href="/signup">
             {tr("Create a facility workspace", "أنشئ مساحة منشأتك")} <ArrowUpRight size={16} />
           </Link>
         </nav>

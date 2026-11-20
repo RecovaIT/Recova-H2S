@@ -183,7 +183,7 @@ export function ProgrammeExplorer() {
             </ul>
             <Link
               className={styles.textLink}
-              href={`/register-organization?programme=${current.id}`}
+              href={`/signup?programme=${current.id}`}
             >
               {tr(`Choose ${current.name}`, `اختر ${t(current.name)}`)}{" "}
               <ArrowRight size={17} aria-hidden="true" />

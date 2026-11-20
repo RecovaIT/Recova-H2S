@@ -258,24 +258,18 @@ export default function ParticipantPortal() {
   const { session, loading: authLoading, logout } = useAuth();
   const { lang: globalLang, setLang: setGlobalLang, t: tGlobal } = useLanguage();
   const router = useRouter();
-  const [lang, setLang] = useState<PortalLang>(() => {
-    if (typeof window === "undefined") return "en";
-    const saved =
-      window.localStorage.getItem("recova_portal_lang") ||
-      window.localStorage.getItem("recova_lang");
-    return saved === "ar" ? "ar" : "en";
-  });
+  // Match the server's initial language; restore browser preferences after hydration.
+  const [lang, setLang] = useState<PortalLang>("en");
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const saved =
-      window.localStorage.getItem("recova_portal_lang") ||
-      window.localStorage.getItem("recova_lang");
-    if (saved === "ar" || saved === "en") {
-      setLang(saved);
-    } else if (globalLang === "ar" || globalLang === "en") {
-      setLang(globalLang);
-    }
+    let active = true;
+    let preferred: PortalLang = globalLang;
+    try {
+      const saved = window.localStorage.getItem("recova_portal_lang") || window.localStorage.getItem("recova_lang");
+      if (saved === "ar" || saved === "en") preferred = saved;
+    } catch { /* Keep the global preference when browser storage is unavailable. */ }
+    queueMicrotask(() => { if (active) setLang(preferred); });
+    return () => { active = false; };
   }, [globalLang]);
   const [data, setData] = useState<Portal | null>(null);
   const [careDetail, setCareDetail] = useState<PortalCareDetail | null>(null);
