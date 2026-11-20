@@ -8,7 +8,10 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 
 from app.api.deps import AuthContext, get_auth_context, requires
+from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailed
 from app.core.permissions import ALL_PERMISSIONS, P, Role
+from app.models.base import utcnow
+from app.models.identity import Organization, ProgrammeRequest
 from app.models.ops import AuditEvent, Job
 from app.schemas.common import Message, Page, PageParams, paginate
 from app.schemas.identity import (
@@ -19,6 +22,10 @@ from app.schemas.identity import (
     OrganizationCreate,
     OrganizationOut,
     OrganizationUpdate,
+    PrimaryProgrammeSelectionRequest,
+    ProgrammeRequestCreate,
+    ProgrammeRequestOut,
+    ProgrammeRequestReview,
     RolePermissionOverrideInput,
     RolePermissionView,
     UserCreateRequest,
@@ -48,6 +55,15 @@ def update_organization(organization_id: uuid.UUID, req: OrganizationUpdate, ctx
     return org_svc.update_organization(ctx, organization_id, req)
 
 
+@orgs_router.post("/{organization_id}/select-primary-programme", response_model=OrganizationOut)
+def select_primary_programme(
+    organization_id: uuid.UUID,
+    req: PrimaryProgrammeSelectionRequest,
+    ctx: AuthContext = Depends(get_auth_context),
+):
+    return org_svc.select_primary_programme(ctx, organization_id, req)
+
+
 @orgs_router.get("/permissions/catalog")
 def list_all_permissions(ctx: AuthContext = Depends(requires(P.ORG_READ))):
     return {"permissions": sorted(ALL_PERMISSIONS)}
@@ -67,6 +83,89 @@ def set_role_override(req: RolePermissionOverrideInput, ctx: AuthContext = Depen
 def delete_role_override(role: Role, permission: str, ctx: AuthContext = Depends(requires(P.ORG_MANAGE))):
     org_svc.delete_role_permission_override(ctx, role, permission)
     return Message(message="Permission override removed")
+
+
+@orgs_router.get("/programme-requests", response_model=list[ProgrammeRequestOut])
+def list_programme_requests(ctx: AuthContext = Depends(requires(P.ORG_READ))):
+    stmt = select(ProgrammeRequest).order_by(ProgrammeRequest.created_at.desc())
+    if not ctx.user.is_platform_admin:
+        stmt = stmt.where(ProgrammeRequest.organization_id == ctx.org_id)
+    rows = ctx.db.scalars(stmt).all()
+    org_names = {
+        o.id: o.name
+        for o in ctx.db.scalars(select(Organization)).all()
+    }
+    out: list[ProgrammeRequestOut] = []
+    for row in rows:
+        item = ProgrammeRequestOut.model_validate(row)
+        item.organization_name = org_names.get(row.organization_id)
+        out.append(item)
+    return out
+
+
+@orgs_router.post("/programme-requests", response_model=ProgrammeRequestOut, status_code=201)
+def create_programme_request(req: ProgrammeRequestCreate, ctx: AuthContext = Depends(requires(P.ORG_MANAGE))):
+    org = ctx.db.get(Organization, ctx.org_id)
+    if org is None:
+        raise NotFound("Organisation not found")
+    if req.requested_programme.value in (org.enabled_tracks or []):
+        raise Conflict(f"Programme '{req.requested_programme.value}' is already enabled for this organisation.")
+    existing = ctx.db.scalar(
+        select(ProgrammeRequest).where(
+            ProgrammeRequest.organization_id == ctx.org_id,
+            ProgrammeRequest.requested_programme == req.requested_programme.value,
+            ProgrammeRequest.status == "pending",
+        )
+    )
+    if existing is not None:
+        raise Conflict("A pending request for this programme already exists.")
+    pr = ProgrammeRequest(
+        organization_id=ctx.org_id,
+        requested_programme=req.requested_programme.value,
+        justification=req.justification.strip(),
+        status="pending",
+        requested_by_id=ctx.user.id,
+    )
+    ctx.db.add(pr)
+    ctx.db.flush()
+    ctx.audit("organization.programme_request.create", "programme_request", pr.id, details={"requested_programme": pr.requested_programme})
+    ctx.db.commit()
+    ctx.db.refresh(pr)
+    out = ProgrammeRequestOut.model_validate(pr)
+    out.organization_name = org.name
+    return out
+
+
+@orgs_router.post("/programme-requests/{request_id}/review", response_model=ProgrammeRequestOut)
+def review_programme_request(request_id: uuid.UUID, req: ProgrammeRequestReview, ctx: AuthContext = Depends(get_auth_context)):
+    if not ctx.user.is_platform_admin:
+        raise Forbidden("Only platform administrators can approve or reject additional programme requests.")
+    pr = ctx.db.get(ProgrammeRequest, request_id)
+    if pr is None:
+        raise NotFound("Programme request not found")
+    if pr.status != "pending":
+        raise ValidationFailed(f"Programme request is already {pr.status}")
+    pr.status = req.decision
+    pr.reviewed_by_id = ctx.user.id
+    pr.reviewed_at = utcnow()
+    pr.review_note = req.review_note
+    org = ctx.db.get(Organization, pr.organization_id)
+    if req.decision == "approved" and org is not None:
+        tracks = list(org.enabled_tracks or [])
+        if pr.requested_programme not in tracks:
+            tracks.append(pr.requested_programme)
+            org.enabled_tracks = tracks
+    ctx.audit(
+        f"organization.programme_request.{req.decision}",
+        "programme_request",
+        pr.id,
+        details={"requested_programme": pr.requested_programme, "organization_id": str(pr.organization_id)},
+    )
+    ctx.db.commit()
+    ctx.db.refresh(pr)
+    out = ProgrammeRequestOut.model_validate(pr)
+    out.organization_name = org.name if org else None
+    return out
 
 
 @users_router.get("", response_model=list[UserWithMembershipsOut])

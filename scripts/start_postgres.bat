@@ -1,0 +1,3 @@
+@echo off
+echo Starting PostgreSQL 16 on port 5432...
+"C:\Users\USER\pgsql\bin\postgres.exe" -D "C:\Users\USER\pgsql\data"

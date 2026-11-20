@@ -210,8 +210,11 @@ export function DecideAiReviewWorkspace({
                   value="ar"
                   className="rounded-lg border border-slate-200 bg-slate-50 p-3.5 text-sm leading-relaxed text-slate-800"
                 >
-                  <div dir="rtl" className="text-right font-sans">
-                    {synthesis.summary_ar || "لم يتم إرجاع ملخص عربي."}
+                  <div dir="rtl" lang="ar" className="space-y-2.5 text-right font-sans">
+                    <p>{synthesis.summary_ar || "لم يتم إرجاع ملخص عربي."}</p>
+                    <p className="border-t border-slate-200 pt-2 text-xs text-slate-500">
+                      مسودة مساعدة للقرار السريري — القرار النهائي بيد الطبيب المختص.
+                    </p>
                   </div>
                 </TabsContent>
                 <TabsContent value="structured">

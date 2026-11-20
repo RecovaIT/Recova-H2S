@@ -1,0 +1,3 @@
+@echo off
+echo Connecting to PostgreSQL recova database...
+"C:\Users\USER\pgsql\bin\psql.exe" -U recova -d recova

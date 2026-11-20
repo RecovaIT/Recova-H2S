@@ -1,0 +1,33 @@
+# Release checklist and CEO decision record
+Status: NOT YET APPROVED FOR SUBMISSION
+
+## Engineering evidence
+- Record final main commit, migration head, build command and deployed revision.
+- Apply migrations to the deployment database after backup/recovery preparation; do not run destructive test fixtures there.
+- Verify fresh login, explicit single-programme onboarding, organisation switching and programme routing.
+- Verify patient login, mobile layout, saved check-in after refresh, consent withdrawal and tenant isolation.
+- Reproduce Case D, Case B and Neuro presbycusis; inspect actual run trace and benchmark results.
+- Verify live agent events in the actual API/worker topology, or describe persisted run history truthfully.
+- Close or explicitly disclose the governance findings; unconfigured external integrations stay visibly unconfigured.
+
+## Submission evidence
+- Yusuf supplies a judge-accessible HTTPS URL and deployment details. Localhost is not a judge-accessible URL.
+- Test judge access in a fresh session, including credentials and permissions supplied privately where needed.
+- Asiyah and the team acknowledge the pitch and agree the demo order.
+- CEO records or approves the narration; export and watch the entire final video, including sound.
+- Attach architecture, dataset description, assumptions, limitations, installation instructions and test evidence.
+- Confirm the actual submission form's file/link limits and cutoff timezone. Submit by the proposed internal target: evening of 19 November, leaving 20 November as contingency.
+- Save the final submission receipt privately. Do not infer submission from a successful upload alone.
+
+## Final approval fields
+CEO decision: pending. Approver and time: not recorded. Deployed URL and release SHA: to be recorded after deployment verification. Video location: not yet supplied. Remaining exceptions: to be accepted or fixed before approval. These are open evidence fields, not completed sign-offs.
+
+## Source register
+- CEO task brief supplied by the user: Task Brief Abdulbasit Fazazi (CEO).pdf, pages 1-3.
+- User clarification, 18 November: required members registered; no current pilot; submit main after branch integration.
+- Hack2skill registration email, 26 October 2026: individual registration confirmation. Private evidence reference in registration-evidence.txt; do not publish email or account details.
+- Hack2skill reminder, 17 November: prototype deadline 20 November; working prototype, concise demo video and technical documentation requested.
+- Official challenge page: https://hack2skill.com/event/futurehealthchallenge/ (checked 18 November).
+- Original shared planning document: https://docs.google.com/document/d/1LGIhOgmrJj-z3lVWQpB2r5FHokiu8z1ufEUhNAbBAiY/edit ; earlier PRD and repository documentation provide product context, not deployment evidence.
+- Technical meeting notes, 17 November: https://docs.google.com/document/d/1KJ-dz36MMUCyCKJfvcBzHMUA5deZGWW-4Kt8gEB64-8/edit ; machine-generated notes are contextual, not verification evidence.
+- Repository sources reviewed: docs/clinical-governance.md, backend/app/api/v1/ops.py, backend/app/agents/gate1_consent.py, backend/app/core/events.py, backend/app/agents/orchestrator.py, frontend/src/hooks/useRealtimeEvents.ts and related application code.

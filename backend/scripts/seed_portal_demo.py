@@ -1,8 +1,11 @@
 """Create 30 synthetic participant accounts. Run from backend with python -m scripts.seed_portal_demo."""
 
 import csv
-import secrets
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import secrets
 from datetime import timedelta
 from sqlalchemy import select
 from app.core.config import get_settings

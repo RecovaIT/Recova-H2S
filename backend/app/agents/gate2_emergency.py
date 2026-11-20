@@ -70,6 +70,10 @@ _SYMPTOM_CODES = {
 }
 
 
+def has_emergency_text(value: str) -> bool:
+    return any(pattern.search(value) for _, _, pattern in _TEXT_RULES)
+
+
 def run_gate2(
     db: Session,
     patient: Patient,

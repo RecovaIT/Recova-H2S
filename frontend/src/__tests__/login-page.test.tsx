@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { LanguageProvider } from "@/hooks/useLanguage";
 import LoginPage from "@/app/login/page";
 import { OrganizationOnboardingCard } from "@/components/OrganizationOnboardingCard";
 import { AuthGuard } from "@/components/AuthGuard";
@@ -47,8 +48,14 @@ describe("LoginPage & Tenant Onboarding", () => {
     });
   });
 
+  it("opens the privacy-protected WorkSafe workspace for supervisors",async()=>{
+    vi.mocked(authService.me).mockResolvedValue({user:{id:"sup",email:"sup@example.com",full_name:"Supervisor",is_active:true,is_platform_admin:false,preferred_language:"en",created_at:"2026-11-19"},active_organization:{id:"yard",name:"Yard",slug:"yard",org_type:"employer",enabled_tracks:["worksafe"],is_active:true,settings:{},created_at:"2026-11-19"},role:"supervisor",permissions:["org:read","workforce:read_aggregate"],tracks:["worksafe"],memberships:[]});
+    render(<AuthProvider><LoginPage/></AuthProvider>);
+    await waitFor(()=>expect(replaceMock).toHaveBeenCalledWith("/worksafe"));
+  });
+
   it("submits OrganizationOnboardingCard in register mode and redirects to /dashboard", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     vi.mocked(authService.registerOrganization).mockResolvedValue({
       user: {
         id: "u1",
@@ -77,7 +84,7 @@ describe("LoginPage & Tenant Onboarding", () => {
 
     render(
       <AuthProvider>
-        <OrganizationOnboardingCard mode="register" />
+        <OrganizationOnboardingCard mode="register" initialProgramme="loop" />
       </AuthProvider>
     );
 
@@ -86,13 +93,23 @@ describe("LoginPage & Tenant Onboarding", () => {
     await user.selectOptions(screen.getByLabelText(/organisation type/i), "clinic");
     await user.type(screen.getByLabelText(/full name/i), "Dr. Tariq Saeed");
     await user.type(screen.getByLabelText(/admin email/i), "admin@dubai-care.ae");
-    await user.type(screen.getByLabelText(/password/i), "DubaiClinicPass123!");
+    await user.type(screen.getByLabelText(/^password/i), "DubaiClinicPass123!");
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    expect(screen.getByRole("button", { name: /recova loop/i })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    expect(screen.getByRole("checkbox", { name: /I confirm the shared/i })).not.toBeChecked();
+    await user.click(screen.getByRole("checkbox", { name: /I confirm the shared/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    expect(authService.registerOrganization).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: /create organisation & sign in/i }));
 
     await waitFor(() => {
       expect(authService.registerOrganization).toHaveBeenCalledWith(
         expect.objectContaining({
           organization_name: "Dubai Care Clinic",
+          primary_programme: "loop",
+          enabled_tracks: ["loop"],
           organization_slug: "dubai-care-clinic",
           org_type: "clinic",
           admin_email: "admin@dubai-care.ae",
@@ -100,10 +117,10 @@ describe("LoginPage & Tenant Onboarding", () => {
       );
       expect(replaceMock).toHaveBeenCalledWith("/dashboard");
     });
-  });
+  }, 15000);
 
   it("remounts AuthGuard children when active organisation switches", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const baseUser = {
       id: "u1",
       email: "admin@hub.ae",
@@ -182,5 +199,25 @@ describe("LoginPage & Tenant Onboarding", () => {
     await user.click(screen.getByRole("button", { name: /switch to b/i }));
     await waitFor(() => expect(screen.getByTestId("active-org")).toHaveTextContent("org-b"));
     expect(screen.getByLabelText("Draft")).toHaveValue("org-a-draft");
+  });
+
+  it("toggles English and Arabic RTL from the top-right switch on LoginPage", async () => {
+    window.localStorage.removeItem("recova_lang");
+    window.localStorage.removeItem("recova_portal_lang");
+    const user = userEvent.setup({ delay: null });
+    render(
+      <LanguageProvider>
+        <AuthProvider>
+          <LoginPage />
+        </AuthProvider>
+      </LanguageProvider>
+    );
+    const toggle = await screen.findByRole("button", { name: "Toggle language" });
+    await user.click(toggle);
+    expect(screen.getByText("مرحبًا بك في ريكوفا")).toBeInTheDocument();
+    expect(document.documentElement).toHaveAttribute("dir", "rtl");
+    expect(document.documentElement).toHaveAttribute("lang", "ar");
+    await user.click(screen.getByRole("button", { name: "Toggle language" }));
+    expect(document.documentElement).toHaveAttribute("dir", "ltr");
   });
 });

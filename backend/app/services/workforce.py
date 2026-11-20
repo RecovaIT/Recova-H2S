@@ -69,7 +69,7 @@ def list_departments(ctx: AuthContext) -> list[Department]:
     ctx.require_track("worksafe")
     stmt = select(Department).where(Department.organization_id == ctx.org_id, Department.is_active.is_(True))
     # Scope supervisors with explicit department assignments
-    if ctx.membership and ctx.membership.department_ids and not ctx.has(P.WORKFORCE_IDENTIFIABLE):
+    if ctx.membership and ctx.membership.department_ids and (ctx.role.value == "supervisor" or not ctx.has(P.WORKFORCE_IDENTIFIABLE)):
         stmt = stmt.where(Department.id.in_(ctx.membership.department_ids))
     return list(ctx.db.scalars(stmt.order_by(Department.name)).all())
 
@@ -232,7 +232,7 @@ def get_department_heatmap(ctx: AuthContext) -> list[dict]:
     ctx.require(P.WORKFORCE_AGGREGATE)
     ctx.require_track("worksafe")
     depts = list_departments(ctx)
-    can_identify = ctx.has(P.WORKFORCE_IDENTIFIABLE)
+    can_identify = ctx.has(P.WORKFORCE_IDENTIFIABLE) and ctx.role.value != "supervisor"
 
     workers = ctx.db.scalars(
         select(Patient).where(
@@ -324,6 +324,9 @@ def get_department_heatmap(ctx: AuthContext) -> list[dict]:
 def list_identifiable_worker_risks(ctx: AuthContext) -> list[dict]:
     """Only accessible to Occupational Health Directors / Org Admins when authorized."""
     ctx.require(P.WORKFORCE_IDENTIFIABLE)
+    if ctx.role and ctx.role.value == "supervisor":
+        from app.core.errors import Forbidden
+        raise Forbidden("Supervisors have aggregate-only access; contact occupational health for individual follow-up")
     ctx.require_track("worksafe")
     workers = ctx.db.scalars(
         select(Patient).where(

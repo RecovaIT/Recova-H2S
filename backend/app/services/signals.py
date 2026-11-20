@@ -48,17 +48,36 @@ def _ensure_enrollment(ctx: AuthContext, patient: Patient, track: str) -> None:
         select(TrackEnrollment).where(TrackEnrollment.patient_id == patient.id, TrackEnrollment.track == track)
     )
     if enr is None:
-        ctx.db.add(
-            TrackEnrollment(
-                organization_id=ctx.org_id,
-                patient_id=patient.id,
-                track=track,
-                status="active",
-                enrolled_at=utcnow(),
-                context={},
-            )
+        now = utcnow()
+        enr = TrackEnrollment(
+            organization_id=ctx.org_id,
+            patient_id=patient.id,
+            track=track,
+            status="active",
+            enrolled_at=now,
+            context={},
+            authority_actor_id=ctx.user.id,
+            authority_reason="Signal ingestion enrolment",
+            history=[
+                {
+                    "action": "enrolled",
+                    "track": track,
+                    "actor_id": str(ctx.user.id),
+                    "actor_email": ctx.user.email,
+                    "at": now.isoformat(),
+                    "reason": "Signal ingestion enrolment",
+                }
+            ],
         )
+        ctx.db.add(enr)
         ctx.db.flush()
+        ctx.audit(
+            "patient.enroll.signal_auto",
+            "track_enrollment",
+            enr.id,
+            patient_id=patient.id,
+            details={"track": track},
+        )
 
 
 def record_observation(ctx: AuthContext, req: ObservationCreate) -> Observation:
@@ -112,6 +131,8 @@ def list_observations(
     track: str | None = None,
 ) -> dict:
     ctx.require(P.OBSERVATIONS_READ)
+    if track:
+        ctx.require_track(track)
     _require_patient(ctx, patient_id)
     stmt = select(Observation).where(Observation.organization_id == ctx.org_id, Observation.patient_id == patient_id)
     if metric_code:
@@ -286,6 +307,8 @@ def create_checkin(ctx: AuthContext, req: CheckInCreate) -> dict:
 
 def list_checkins(ctx: AuthContext, patient_id: uuid.UUID) -> list[CheckIn]:
     ctx.require(P.OBSERVATIONS_READ)
+    if track:
+        ctx.require_track(track)
     _require_patient(ctx, patient_id)
     return list(
         ctx.db.scalars(

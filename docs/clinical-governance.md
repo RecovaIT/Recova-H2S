@@ -1,6 +1,6 @@
 # Clinical Governance, DECIDE-AI & Interoperability
 
-Recova aligns clinical safety controls, AI human-factors transparency, workforce privacy, and healthcare interoperability directly into enforced backend invariants.
+Recova implements prototype controls for clinical safety, AI human-factors transparency, workforce privacy, and healthcare interoperability in the backend. This document describes implementation, not clinical validation, regulatory certification or approval for patient deployment.
 
 ## 1. Human-in-the-Loop & DECIDE-AI Safeguards
 
@@ -14,7 +14,7 @@ Recova adheres to strict boundaries between deterministic analytics, generative 
 
 2. **Clinician Review Sign-Off (`ClinicalReview` & `DecideAiReviewWorkspace.tsx`):**
    - Clinicians review the deterministic Agent 4 trace, data completeness/confidence, confounders, and Agent 5 bilingual draft before signing a decision (`approve_referral`, `modify_plan`, `request_lab`, `no_action`, or `reject`).
-   - Every submitted review generates a server-side SHA-256 `signature_hash` stamped with reviewer ID, role, optional practitioner license number, and timestamp.
+   - A review record is not external licence verification or a certified digital signature. Every submitted review generates a server-side SHA-256 `signature_hash` stamped with reviewer ID, role, optional practitioner license number, and timestamp.
 
 3. **Closed-Loop Outcome Accountability (`app/models/care.py`):**
    - Agent 6 proposes/initiates referral pathways (`proposed`) matching configured `InsurancePlan` rules and `CareFacility` networks.
@@ -46,9 +46,18 @@ To prevent employer discrimination or retaliatory visibility in **Recova WorkSaf
 ## 4. HL7 FHIR R4.0.1 & Regional Health Integration (`app/integrations/fhir.py`)
 
 - **FHIR R4 Bundle Builder (`GET /api/v1/fhir/patients/{patient_id}/bundle`):**
-  Generates `collection` or `transaction` Bundles containing standards-compliant HL7 FHIR R4 resources: `Organization`, `Patient` (tagged with Malaffi MRN & Sahatna participant identifiers), `Practitioner` (DOH license identifier), `Consent`, `Coverage`, `Observation` (LOINC-coded telemetry + Agent 4 interpretation codes `N` / `A` / `AA` / `HH` / `IND`), `QuestionnaireResponse` (IFHAS / PHQ-9), `ServiceRequest`, `CarePlan`, `Communication`, and `Encounter`.
+  Generates `collection` or `transaction` Bundles containing FHIR R4-oriented resources: `Organization`, `Patient` (tagged with Malaffi MRN & Sahatna participant identifiers), `Practitioner` (DOH license identifier), `Consent`, `Coverage`, `Observation` (LOINC-coded telemetry + Agent 4 interpretation codes `N` / `A` / `AA` / `HH` / `IND`), `QuestionnaireResponse` (IFHAS / PHQ-9), `ServiceRequest`, `CarePlan`, `Communication`, and `Encounter`.
 - **Structural & Reference Integrity Validator (`POST /api/v1/fhir/validate`):**
-  Validates resource types, `fullUrl` uniqueness, and `urn:uuid:` internal reference integrity across Bundle entries.
+  Provides local checks, not full HL7 profile or terminology conformance certification. Validates resource types, `fullUrl` uniqueness, and `urn:uuid:` internal reference integrity across Bundle entries.
 - **Truthful HIE & Notification Delivery (`malaffi.py`, `sahatna.py`, `notifications.py`):**
   - `POST /api/v1/fhir/patients/{patient_id}/push-malaffi` reports `not_configured` until valid Malaffi OAuth2 credentials (`base_url`, `token_url`, `client_id`, `client_secret`) are provided and reachable.
-  - External notifications (SMTP, Twilio SMS/WhatsApp, Sahatna) never report `sent` or `delivered` unless the external provider API confirms acceptance; otherwise the `notifications` table persists `not_configured` or `failed` transparently.
+  - External notifications (SMTP, Twilio SMS/WhatsApp, Sahatna) record provider acceptance when confirmed; acceptance alone does not establish delivery, reading or outcome; otherwise the `notifications` table persists `not_configured` or `failed` transparently.
+
+## Release review boundaries (18 November 2026)
+
+- HIE export and push now require an effective, unexpired `hie_sharing` grant using the shared consent evaluator. Regression tests cover absent, future, expired, revoked and re-granted consent. This does not certify all external integrations.
+- Live agent event names were corrected during integration. The event broker is process-local; separate API/worker processes require shared transport or explicit persisted-state refresh. Verify the deployed topology before claiming live streaming.
+- Regional identifiers are supplied values. Neither identifiers nor a bundle builder prove Malaffi/Sahatna connectivity; test official destination requirements independently.
+- Synthetic benchmark results are scenario agreement, not clinical accuracy or demonstrated relapse prevention. The six stages are deterministic workflow stages plus optional AI synthesis, not six independent language models.
+- Arabic output quality, actual licence checks, deployment sovereignty, backups and encryption coverage need specific verification. Engineering requirements are not evidence that compliance has been achieved.
+- An external delivery receipt, patient acknowledgement and clinical outcome are distinct records. Clinical review remains necessary; no autonomous diagnosis or treatment claim is made.

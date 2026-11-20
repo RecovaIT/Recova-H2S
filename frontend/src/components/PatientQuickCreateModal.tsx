@@ -56,9 +56,11 @@ export function PatientQuickCreateModal({
   const [tracks, setTracks] = useState<Track[]>(
     defaultTrack ? [defaultTrack] : (allowedTracks.filter((t): t is Track => ALL_TRACKS.includes(t as Track)).slice(0, 1))
   );
-  const [grantDataConsent, setGrantDataConsent] = useState(true);
-  const [grantLlmConsent, setGrantLlmConsent] = useState(true);
+  const [grantDataConsent, setGrantDataConsent] = useState(false);
+  const [grantWearableConsent, setGrantWearableConsent] = useState(false);
+  const [grantLlmConsent, setGrantLlmConsent] = useState(false);
   const [grantHieConsent, setGrantHieConsent] = useState(false);
+  const [consentReference,setConsentReference] = useState("");
 
   const toggleTrack = (t: Track) => {
     setTracks((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
@@ -69,6 +71,9 @@ export function PatientQuickCreateModal({
     if (tracks.length === 0) {
       pushToast("Select at least one track", "error");
       return;
+    }
+    if((grantDataConsent || grantWearableConsent || grantLlmConsent || grantHieConsent) && !consentReference.trim()) {
+      pushToast("Add the existing consent record reference", "error", "You can register the participant without these permissions and let them choose in their portal.");return;
     }
     setBusy(true);
     try {
@@ -93,27 +98,39 @@ export function PatientQuickCreateModal({
 
       const scopesToGrant: ConsentScope[] = [];
       if (grantDataConsent) {
-        scopesToGrant.push("data_processing", "wearable_ingestion");
+        scopesToGrant.push("data_processing");
       }
+      if(grantWearableConsent) scopesToGrant.push("wearable_ingestion");
       if (grantLlmConsent) scopesToGrant.push("llm_synthesis");
       if (grantHieConsent) scopesToGrant.push("hie_sharing");
 
-      await Promise.all(
+      const consentResults = await Promise.allSettled(
         scopesToGrant.map((scope) =>
           patientsService.grantConsent({
             patient_id: created.id,
             scope,
-            method: "electronic",
+            method: "written",
             granted_by_name: `${created.given_name} ${created.family_name}`,
+            evidence_reference:consentReference.trim(),
           })
         )
       );
 
-      pushToast("Participant registered", "success", `${created.given_name} ${created.family_name} (${created.mrn})`);
+      if (consentResults.some((result) => result.status === "rejected")) {
+        pushToast("Participant saved; consent needs attention", "info", "Review consent in the patient record before processing. Do not register the participant again.");
+      }
+
+      if (email.trim()) {
+        try {
+          const invite=await patientsService.issuePortalInvitation(created.id,email.trim());
+          pushToast("Participant registered", "info", invite.delivery_status === "not_configured" ? "Portal invitation saved. Configure server SMTP, then retry from email deliveries." : "A private portal setup email has been queued.");
+        } catch(e){pushToast("Participant saved; invitation needs attention", "info",e instanceof Error?e.message:"Resend from the patient record")}
+      } else pushToast("Participant registered", "success", "Add an email address and issue a portal invitation when the participant is ready.");
       onOpenChange(false);
       setMrn("");
       setGivenName("");
       setFamilyName("");
+      setGrantDataConsent(false);setGrantWearableConsent(false);setGrantLlmConsent(false);setGrantHieConsent(false);setConsentReference("");setEmail("");
       onCreated(created);
     } catch (err) {
       pushToast("Failed to register participant", "error", err instanceof Error ? err.message : undefined);
@@ -142,8 +159,8 @@ export function PatientQuickCreateModal({
             </Select>
           </div>
           <div className="space-y-1">
-            <Label>MRN / Worker ID *</Label>
-            <Input required value={mrn} onChange={(e) => setMrn(e.target.value)} placeholder="MRN-10042" />
+            <Label htmlFor="participant-mrn">MRN / Worker ID *</Label>
+            <Input id="participant-mrn" required value={mrn} onChange={(e) => setMrn(e.target.value)} placeholder="MRN-10042" />
           </div>
           <div className="space-y-1">
             <Label>Preferred Language</Label>
@@ -156,12 +173,12 @@ export function PatientQuickCreateModal({
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="space-y-1">
-            <Label>Given Name *</Label>
-            <Input required value={givenName} onChange={(e) => setGivenName(e.target.value)} />
+            <Label htmlFor="participant-given">Given Name *</Label>
+            <Input id="participant-given" required value={givenName} onChange={(e) => setGivenName(e.target.value)} />
           </div>
           <div className="space-y-1">
-            <Label>Family Name *</Label>
-            <Input required value={familyName} onChange={(e) => setFamilyName(e.target.value)} />
+            <Label htmlFor="participant-family">Family Name *</Label>
+            <Input id="participant-family" required value={familyName} onChange={(e) => setFamilyName(e.target.value)} />
           </div>
         </div>
 
@@ -187,8 +204,8 @@ export function PatientQuickCreateModal({
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="space-y-1">
-            <Label>Email</Label>
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Label htmlFor="participant-email">Email</Label>
+            <Input id="participant-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
           {insurancePlans.length > 0 && (
             <div className="space-y-1">
@@ -278,19 +295,25 @@ export function PatientQuickCreateModal({
         </div>
 
         <div className="space-y-2 rounded-lg border border-slate-200 p-3 text-xs">
-          <div className="font-semibold text-slate-800">Initial Electronic Consent Governance</div>
+          <div className="font-semibold text-slate-800">Record existing participant permissions</div>
+          <p>Only record permissions already obtained from the participant. Otherwise, leave these off so they can choose in their portal.</p>
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={grantDataConsent} onChange={(e) => setGrantDataConsent(e.target.checked)} />
-            Grant mandatory <code>data_processing</code> &amp; <code>wearable_ingestion</code> consent
+            Care-data processing permission recorded
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={grantWearableConsent} onChange={(e)=>setGrantWearableConsent(e.target.checked)}/>
+            Wearable data permission recorded
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={grantLlmConsent} onChange={(e) => setGrantLlmConsent(e.target.checked)} />
-            Grant de-identified <code>llm_synthesis</code> consent
+            External AI summary permission recorded
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={grantHieConsent} onChange={(e) => setGrantHieConsent(e.target.checked)} />
-            Grant UAE HIE FHIR sharing (<code>hie_sharing</code>)
+            Health information exchange permission recorded
           </label>
+          {(grantDataConsent || grantWearableConsent || grantLlmConsent || grantHieConsent) && <div className="space-y-1"><Label htmlFor="consent-reference">Consent record reference</Label><Input id="consent-reference" required value={consentReference} onChange={e=>setConsentReference(e.target.value)} placeholder="Signed consent form reference"/></div>}
         </div>
 
         <div className="flex justify-end gap-2">

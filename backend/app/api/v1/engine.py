@@ -6,24 +6,40 @@ import asyncio
 import json
 import uuid
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.agents.orchestrator import AGENT_DEFINITIONS, create_pipeline_run, execute_pipeline_run
-from app.api.deps import AuthContext, requires
+from app.agents.orchestrator import (
+    AGENT_DEFINITIONS,
+    create_pipeline_run,
+    execute_pipeline_run,
+)
+from app.api.deps import (
+    AuthContext,
+    requires,
+    _load_session,
+    resolve_permissions,
+    get_auth_context,
+)
 from app.core.db import SessionLocal
-from app.core.errors import NotFound
+from app.core.errors import AppError, NotFound
 from app.core.events import event_bus, format_sse
-from app.core.permissions import P
+from app.core.permissions import P, Role
 from app.core.security import hash_token
 from app.engine.metrics import TRACK_CONFIGS
 from app.engine.scoring import ALGORITHM_VERSION
 from app.models.base import utcnow
 from app.models.clinical import Patient
-from app.models.engine import ClinicalSynthesis, EmergencyEvent, PersonalBaseline, PipelineRun, ScoringResult
-from app.models.identity import UserSession
+from app.models.engine import (
+    ClinicalSynthesis,
+    EmergencyEvent,
+    PersonalBaseline,
+    PipelineRun,
+    ScoringResult,
+)
+from app.models.identity import UserSession, Membership, Organization
 from app.schemas.common import Page, PageParams, paginate
 from app.schemas.workflow import (
     EmergencyEventOut,
@@ -43,13 +59,22 @@ agents_router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 @baselines_router.get("/patient/{patient_id}")
-def list_patient_baselines(patient_id: uuid.UUID, ctx: AuthContext = Depends(requires(P.OBSERVATIONS_READ))):
-    p = ctx.db.scalar(select(Patient).where(Patient.id == patient_id, Patient.organization_id == ctx.org_id))
+def list_patient_baselines(
+    patient_id: uuid.UUID, ctx: AuthContext = Depends(requires(P.OBSERVATIONS_READ))
+):
+    p = ctx.db.scalar(
+        select(Patient).where(
+            Patient.id == patient_id, Patient.organization_id == ctx.org_id
+        )
+    )
     if p is None:
         raise NotFound("Patient not found")
     rows = ctx.db.scalars(
         select(PersonalBaseline)
-        .where(PersonalBaseline.organization_id == ctx.org_id, PersonalBaseline.patient_id == patient_id)
+        .where(
+            PersonalBaseline.organization_id == ctx.org_id,
+            PersonalBaseline.patient_id == patient_id,
+        )
         .order_by(PersonalBaseline.metric_code)
     ).all()
     return [
@@ -75,17 +100,29 @@ def reset_patient_baseline(
     reason: str = Query("Clinician requested baseline reset"),
     ctx: AuthContext = Depends(requires(P.REVIEWS_SIGN)),
 ):
-    p = ctx.db.scalar(select(Patient).where(Patient.id == patient_id, Patient.organization_id == ctx.org_id))
+    p = ctx.db.scalar(
+        select(Patient).where(
+            Patient.id == patient_id, Patient.organization_id == ctx.org_id
+        )
+    )
     if p is None:
         raise NotFound("Patient not found")
-    stmt = select(PersonalBaseline).where(PersonalBaseline.organization_id == ctx.org_id, PersonalBaseline.patient_id == patient_id)
+    stmt = select(PersonalBaseline).where(
+        PersonalBaseline.organization_id == ctx.org_id,
+        PersonalBaseline.patient_id == patient_id,
+    )
     if metric_code:
         stmt = stmt.where(PersonalBaseline.metric_code == metric_code)
     rows = ctx.db.scalars(stmt).all()
     for b in rows:
         b.status = "reset"
         b.reset_reason = reason
-    ctx.audit("baseline.reset", "personal_baseline", patient_id=patient_id, details={"metric_code": metric_code, "reason": reason})
+    ctx.audit(
+        "baseline.reset",
+        "personal_baseline",
+        patient_id=patient_id,
+        details={"metric_code": metric_code, "reason": reason},
+    )
     ctx.db.commit()
     return {"reset_count": len(rows)}
 
@@ -96,10 +133,16 @@ def list_scoring_results(
     track: str | None = Query(None),
     ctx: AuthContext = Depends(requires(P.PIPELINE_READ)),
 ):
-    stmt = select(ScoringResult).where(ScoringResult.organization_id == ctx.org_id, ScoringResult.patient_id == patient_id)
+    stmt = select(ScoringResult).where(
+        ScoringResult.organization_id == ctx.org_id,
+        ScoringResult.patient_id == patient_id,
+    )
     if track:
+        ctx.require_track(track)
         stmt = stmt.where(ScoringResult.track == track)
-    return list(ctx.db.scalars(stmt.order_by(ScoringResult.computed_at.desc()).limit(50)).all())
+    return list(
+        ctx.db.scalars(stmt.order_by(ScoringResult.computed_at.desc()).limit(50)).all()
+    )
 
 
 @scoring_router.get("/config")
@@ -113,7 +156,15 @@ def scoring_configuration(ctx: AuthContext = Depends(requires(P.PIPELINE_READ)))
                 "max_baseline_windows": v.max_baseline_windows,
                 "evaluation_window_days": v.evaluation_window_days,
                 "practice_gain_rate": v.practice_gain_rate,
-                "metrics": [{"metric_code": m.metric_code, "weight": m.weight, "apply_practice_effect": m.apply_practice_effect, "use_reference_fallback": m.use_reference_fallback} for m in v.metrics],
+                "metrics": [
+                    {
+                        "metric_code": m.metric_code,
+                        "weight": m.weight,
+                        "apply_practice_effect": m.apply_practice_effect,
+                        "use_reference_fallback": m.use_reference_fallback,
+                    }
+                    for m in v.metrics
+                ],
             }
             for k, v in TRACK_CONFIGS.items()
         },
@@ -129,10 +180,14 @@ def list_pipeline_runs(
     risk_tier: str | None = Query(None),
     ctx: AuthContext = Depends(requires(P.PIPELINE_READ)),
 ):
-    stmt = select(PipelineRun).where(PipelineRun.organization_id == ctx.org_id, PipelineRun.benchmark_run_id.is_(None))
+    stmt = select(PipelineRun).where(
+        PipelineRun.organization_id == ctx.org_id,
+        PipelineRun.benchmark_run_id.is_(None),
+    )
     if patient_id:
         stmt = stmt.where(PipelineRun.patient_id == patient_id)
     if track:
+        ctx.require_track(track)
         stmt = stmt.where(PipelineRun.track == track)
     if status:
         stmt = stmt.where(PipelineRun.status == status)
@@ -142,13 +197,18 @@ def list_pipeline_runs(
         ctx.db,
         stmt,
         params,
-        sortable={"created_at": PipelineRun.created_at, "risk_tier": PipelineRun.risk_tier},
+        sortable={
+            "created_at": PipelineRun.created_at,
+            "risk_tier": PipelineRun.risk_tier,
+        },
         default_sort=PipelineRun.created_at.desc(),
     )
 
 
 @pipeline_router.post("/runs", response_model=PipelineRunDetailOut, status_code=201)
-def run_pipeline(req: PipelineRunCreate, ctx: AuthContext = Depends(requires(P.PIPELINE_RUN))):
+def run_pipeline(
+    req: PipelineRunCreate, ctx: AuthContext = Depends(requires(P.PIPELINE_RUN))
+):
     ctx.require_track(req.track.value)
     run = create_pipeline_run(
         ctx.db,
@@ -179,7 +239,9 @@ def run_pipeline(req: PipelineRunCreate, ctx: AuthContext = Depends(requires(P.P
 
 
 @pipeline_router.get("/runs/{run_id}", response_model=PipelineRunDetailOut)
-def get_pipeline_run(run_id: uuid.UUID, ctx: AuthContext = Depends(requires(P.PIPELINE_READ))):
+def get_pipeline_run(
+    run_id: uuid.UUID, ctx: AuthContext = Depends(requires(P.PIPELINE_READ))
+):
     return _build_run_detail(ctx, run_id)
 
 
@@ -192,7 +254,9 @@ def _build_run_detail(ctx: AuthContext, run_id: uuid.UUID) -> PipelineRunDetailO
     if run is None:
         raise NotFound("Pipeline run not found")
     sr = ctx.db.scalar(select(ScoringResult).where(ScoringResult.run_id == run.id))
-    syn = ctx.db.scalar(select(ClinicalSynthesis).where(ClinicalSynthesis.run_id == run.id))
+    syn = ctx.db.scalar(
+        select(ClinicalSynthesis).where(ClinicalSynthesis.run_id == run.id)
+    )
     out = PipelineRunDetailOut.model_validate(run)
     # Only expose raw step payloads if caller has agents:inspect
     if not ctx.has(P.AGENTS_INSPECT):
@@ -205,24 +269,52 @@ def _build_run_detail(ctx: AuthContext, run_id: uuid.UUID) -> PipelineRunDetailO
 
 
 @pipeline_router.get("/events/stream")
-async def sse_event_stream(ctx: AuthContext = Depends(requires(P.PIPELINE_READ))):
+async def sse_event_stream(
+    request: Request, ctx: AuthContext = Depends(requires(P.PIPELINE_READ))
+):
     """Real-time Server-Sent Events stream scoped to the caller's organisation."""
     loop = asyncio.get_running_loop()
     sub = event_bus.subscribe(f"org:{ctx.org_id}", loop)
 
+    def can_stream():
+        try:
+            with SessionLocal() as db:
+                current = get_auth_context(request, db)
+                return (
+                    current.organization is not None
+                    and current.org_id == ctx.org_id
+                    and current.has(P.PIPELINE_READ)
+                )
+        except AppError:
+            return False
+
     async def gen():
         try:
-            yield format_sse({"type": "connected", "timestamp": utcnow().isoformat(), "data": {"organization_id": str(ctx.org_id)}})
+            yield format_sse(
+                {
+                    "type": "connected",
+                    "timestamp": utcnow().isoformat(),
+                    "data": {"organization_id": str(ctx.org_id)},
+                }
+            )
             while True:
+                if not can_stream():
+                    break
                 try:
-                    ev = await asyncio.wait_for(sub.queue.get(), timeout=20.0)
+                    ev = await asyncio.wait_for(sub.queue.get(), timeout=5.0)
+                    if not can_stream():
+                        break
                     yield format_sse(ev)
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
         finally:
             event_bus.unsubscribe(sub)
 
-    return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @pipeline_router.websocket("/ws")
@@ -235,21 +327,64 @@ async def ws_event_stream(websocket: WebSocket):
     if not raw_cookie:
         await websocket.close(code=4401)
         return
-    with SessionLocal() as db:
-        sess = db.scalar(select(UserSession).where(UserSession.token_hash == hash_token(raw_cookie), UserSession.revoked_at.is_(None)))
-        if sess is None or sess.expires_at <= utcnow() or sess.active_organization_id is None:
-            await websocket.close(code=4401)
-            return
-        org_id = sess.active_organization_id
+
+    def authorised_org():
+        with SessionLocal() as db:
+            sess, user = _load_session(websocket, db)
+            org = (
+                db.get(Organization, sess.active_organization_id)
+                if sess.active_organization_id
+                else None
+            )
+            if org is None or not org.is_active:
+                return None
+            member = db.scalar(
+                select(Membership).where(
+                    Membership.user_id == user.id,
+                    Membership.organization_id == org.id,
+                    Membership.is_active.is_(True),
+                )
+            )
+            role = (
+                Role(member.role)
+                if member
+                else (Role.PLATFORM_ADMIN if user.is_platform_admin else None)
+            )
+            perms, _ = resolve_permissions(db, org, role, user.is_platform_admin)
+            return org.id if P.PIPELINE_READ in perms else None
+
+    try:
+        org_id = authorised_org()
+    except AppError:
+        org_id = None
+    if org_id is None:
+        await websocket.close(code=4403)
+        return
 
     await websocket.accept()
     loop = asyncio.get_running_loop()
     sub = event_bus.subscribe(f"org:{org_id}", loop)
     try:
-        await websocket.send_text(json.dumps({"type": "connected", "organization_id": str(org_id)}))
+        await websocket.send_text(
+            json.dumps({"type": "connected", "organization_id": str(org_id)})
+        )
         while True:
             try:
-                ev = await asyncio.wait_for(sub.queue.get(), timeout=25.0)
+                still_authorised = authorised_org() == org_id
+            except AppError:
+                still_authorised = False
+            if not still_authorised:
+                await websocket.close(code=4403)
+                break
+            try:
+                ev = await asyncio.wait_for(sub.queue.get(), timeout=5.0)
+                try:
+                    allowed = authorised_org() == org_id
+                except AppError:
+                    allowed = False
+                if not allowed:
+                    await websocket.close(code=4403)
+                    break
                 await websocket.send_text(json.dumps(ev, default=str))
             except asyncio.TimeoutError:
                 await websocket.send_text(json.dumps({"type": "ping"}))
@@ -268,10 +403,17 @@ def list_agents(ctx: AuthContext = Depends(requires(P.PIPELINE_READ))):
 
 
 @agents_router.get("/emergencies", response_model=list[EmergencyEventOut])
-def list_emergencies(status: str | None = Query(None), ctx: AuthContext = Depends(requires(P.PIPELINE_READ))):
+def list_emergencies(
+    status: str | None = Query(None),
+    ctx: AuthContext = Depends(requires(P.PIPELINE_READ)),
+):
     return care_svc.list_emergencies(ctx, status=status)
 
 
 @agents_router.post("/emergencies/{event_id}/resolve", response_model=EmergencyEventOut)
-def resolve_emergency(event_id: uuid.UUID, req: EmergencyResolveRequest, ctx: AuthContext = Depends(requires(P.REVIEWS_SIGN))):
+def resolve_emergency(
+    event_id: uuid.UUID,
+    req: EmergencyResolveRequest,
+    ctx: AuthContext = Depends(requires(P.REVIEWS_SIGN)),
+):
     return care_svc.resolve_emergency(ctx, event_id, req)

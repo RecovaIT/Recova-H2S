@@ -2,11 +2,12 @@
 
 import React, { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Shield, Users } from "lucide-react";
+import { Eye, EyeOff, Shield, Users } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { opsService } from "@/services/ops";
 import type {
   AuditEvent,
+  AuthorityScope,
   JobRecord,
   Organization,
   RolePermissionView,
@@ -24,6 +25,8 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
+import { EmailDeliveryPanel } from "@/components/EmailDeliveryPanel";
+import { api } from "@/lib/api";
 
 const ADMIN_TABS = new Set(["users", "rbac", "orgs", "audit", "jobs"]);
 
@@ -51,7 +54,12 @@ function AdminPageContent() {
   const [permCatalog, setPermCatalog] = useState<string[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditEvent[]>([]);
   const [jobs, setJobs] = useState<JobRecord[]>([]);
+  const [authorityScopes, setAuthorityScopes] = useState<AuthorityScope[]>([]);
   const [busy, setBusy] = useState(false);
+
+  // Authority scope form
+  const [scopeUserId, setScopeUserId] = useState("");
+  const [scopeEmirates, setScopeEmirates] = useState("Abu Dhabi");
 
   // New user form
   const [uEmail, setUEmail] = useState("");
@@ -59,6 +67,7 @@ function AdminPageContent() {
   const [uRole, setURole] = useState("clinician");
   const [uPassword, setUPassword] = useState("");
   const [uLicense, setULicense] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   // Role permission override form
   const [ovRole, setOvRole] = useState("supervisor");
@@ -69,6 +78,7 @@ function AdminPageContent() {
   const [orgName, setOrgName] = useState("");
   const [orgSlug, setOrgSlug] = useState("");
   const [orgType, setOrgType] = useState("hospital");
+  const [orgPrimaryProgramme, setOrgPrimaryProgramme] = useState<Track>("core");
 
   const loadAdmin = useCallback(async () => {
     const [uList, oList, rList, catRes] = await Promise.all([
@@ -81,6 +91,9 @@ function AdminPageContent() {
     setOrgs(oList);
     setRoles(rList);
     setPermCatalog(catRes.permissions);
+    if (session?.user?.is_platform_admin) {
+      opsService.listAuthorityScopes().then(setAuthorityScopes).catch(() => setAuthorityScopes([]));
+    }
     if (hasPermission("audit:read")) {
       const [aPage, jPage] = await Promise.all([
         opsService.listAuditLogs({ page: 1, page_size: 40 }),
@@ -89,7 +102,7 @@ function AdminPageContent() {
       setAuditLogs(aPage.items);
       setJobs(jPage.items);
     }
-  }, [hasPermission]);
+  }, [hasPermission, session?.user?.is_platform_admin]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -102,18 +115,19 @@ function AdminPageContent() {
     e.preventDefault();
     setBusy(true);
     try {
-      await opsService.createUser({
+      const result = await opsService.createUser({
         email: uEmail.trim(),
         full_name: uName.trim(),
         role: uRole,
-        password: uPassword,
+        password: uPassword || undefined,
+        send_activation_email: true,
         license_number: uLicense.trim() || undefined,
       });
       setUEmail("");
       setUName("");
       setUPassword("");
       setULicense("");
-      pushToast("User added to active organisation", "success");
+      pushToast("User added to active organisation", result.activation?.status === "not_configured" ? "info" : "success", result.activation?.status === "not_configured" ? "Setup email is waiting for server SMTP configuration. See email deliveries below." : "A private setup email has been queued. Check email deliveries for its status.");
       await loadAdmin();
     } catch (err) {
       pushToast("Failed to create user", "error", err instanceof Error ? err.message : undefined);
@@ -125,11 +139,23 @@ function AdminPageContent() {
   const toggleUserActive = async (u: UserWithMemberships) => {
     try {
       await opsService.updateUser(u.id, { is_active: !u.is_active });
-      pushToast(u.is_active ? "User deactivated" : "User activated", "info");
+      pushToast(u.is_active ? "Access disabled" : "Access restored", "info", session?.user.is_platform_admin ? "This changes the global account." : "This changes access to this facility only.");
       await loadAdmin();
     } catch (err) {
       pushToast("Update failed", "error", err instanceof Error ? err.message : undefined);
     }
+  };
+
+  const updateLicense = async (u: UserWithMemberships) => {
+    const value=window.prompt("Enter the practitioner's actual professional licence number. This is recorded for clinical sign-off; it is not independent licence verification.",u.license_number || "");
+    if(value===null)return;
+    try { await opsService.updateUser(u.id,{license_number:value.trim()}); await loadAdmin(); pushToast("Professional licence record updated","success"); }
+    catch(e){pushToast("Could not update licence","error",e instanceof Error?e.message:undefined)}
+  };
+
+  const resendSetup = async (id:string) => {
+    try { const res=await api.post<{status:string}>(`/users/${id}/resend-activation`); pushToast("Setup email requested", "info", `Delivery status: ${res.status}. See email deliveries below.`); }
+    catch(e){pushToast("Could not resend setup", "error",e instanceof Error?e.message:undefined)}
   };
 
   const handleSaveOverride = async (e: React.FormEvent) => {
@@ -150,11 +176,22 @@ function AdminPageContent() {
     e.preventDefault();
     setBusy(true);
     try {
+      const derivedSlug =
+        (
+          orgSlug.trim() ||
+          orgName
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, "")
+        ) || `tenant-${Math.floor(Math.random() * 10000)}`;
+
       await opsService.createOrganization({
         name: orgName.trim(),
-        slug: orgSlug.trim().toLowerCase(),
+        slug: derivedSlug,
         org_type: orgType,
-        enabled_tracks: ["core", "loop", "neuro", "worksafe"] as Track[],
+        primary_programme: orgPrimaryProgramme,
+        enabled_tracks: [orgPrimaryProgramme],
       });
       setOrgName("");
       setOrgSlug("");
@@ -227,6 +264,7 @@ function AdminPageContent() {
                         <option value="screening_coordinator">Screening Coordinator</option>
                         <option value="occ_health_director">Occ Health Director</option>
                         <option value="supervisor">Supervisor</option>
+                        <option value="authority_user">Authority User</option>
                         <option value="org_admin">Org Admin</option>
                       </Select>
                     </div>
@@ -235,8 +273,29 @@ function AdminPageContent() {
                       <Input value={uLicense} onChange={(e) => setULicense(e.target.value)} />
                     </div>
                     <div className="space-y-1 sm:col-span-4">
-                      <Label>Initial Password (min 10 chars)</Label>
-                      <Input type="password" required minLength={10} value={uPassword} onChange={(e) => setUPassword(e.target.value)} />
+                      <Label htmlFor="admin-user-password">Optional initial password (recipient sets their own by email)</Label>
+                      <div className="relative">
+                        <Input
+                          id="admin-user-password"
+                          type={showPassword ? "text" : "password"}
+                          minLength={10}
+                          value={uPassword}
+                          onChange={(e) => setUPassword(e.target.value)}
+                          className="pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((prev) => !prev)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700 focus:outline-none"
+                          aria-label={showPassword ? "Hide input" : "Reveal input"}
+                        >
+                          {showPassword ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
                     </div>
                     <Button type="submit" disabled={busy} className="sm:col-span-2">Create User</Button>
                   </form>
@@ -272,9 +331,13 @@ function AdminPageContent() {
                           <StatusBadge status={u.is_active ? "completed" : "rejected"} />
                         </TableCell>
                         <TableCell className="text-right">
+                          {hasPermission("users:manage") && <Button size="sm" variant="outline" onClick={()=>void updateLicense(u)}>Licence</Button>}
+                          {hasPermission("users:manage") && u.is_active && !u.email_verified_at && (
+                            <Button size="sm" variant="ghost" onClick={()=>void resendSetup(u.id)}>Resend setup</Button>
+                          )}
                           {hasPermission("users:manage") && (
                             <Button size="sm" variant="outline" onClick={() => void toggleUserActive(u)}>
-                              {u.is_active ? "Deactivate" : "Reactivate"}
+                              {u.is_active ? (session?.user.is_platform_admin ? "Disable account" : "Disable facility access") : "Restore access"}
                             </Button>
                           )}
                         </TableCell>
@@ -284,6 +347,7 @@ function AdminPageContent() {
                 </Table>
               </CardContent>
             </Card>
+            <EmailDeliveryPanel />
           </TabsContent>
 
           <TabsContent value="rbac" className="space-y-4">
@@ -356,16 +420,87 @@ function AdminPageContent() {
                 </CardHeader>
                 <CardContent>
                   <form onSubmit={handleCreateOrg} className="flex flex-wrap items-end gap-3">
-                    <Input required value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="Organisation Name" className="w-64" />
-                    <Input required pattern="[a-z0-9-]+" value={orgSlug} onChange={(e) => setOrgSlug(e.target.value)} placeholder="slug-id" className="w-44" />
-                    <Select value={orgType} onChange={(e) => setOrgType(e.target.value)} className="w-40">
+                    <Input required value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="Organisation Name" className="w-60" />
+                    <Input pattern="[a-z0-9-]*" value={orgSlug} onChange={(e) => setOrgSlug(e.target.value)} placeholder="slug (optional)" className="w-40" />
+                    <Select value={orgType} onChange={(e) => setOrgType(e.target.value)} className="w-36">
                       <option value="hospital">Hospital</option>
                       <option value="clinic">Clinic</option>
                       <option value="employer">Employer</option>
                       <option value="rehab_center">Rehab Center</option>
+                      <option value="public_health">Public Health</option>
+                    </Select>
+                    <Select value={orgPrimaryProgramme} onChange={(e) => setOrgPrimaryProgramme(e.target.value as Track)} className="w-36">
+                      <option value="core">Core</option>
+                      <option value="loop">Loop</option>
+                      <option value="neuro">Neuro</option>
+                      <option value="worksafe">WorkSafe</option>
                     </Select>
                     <Button type="submit" disabled={busy}>Provision Org</Button>
                   </form>
+                </CardContent>
+              </Card>
+            )}
+
+            {hasPermission("platform:admin") && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Assign Authority Scope</CardTitle>
+                  <CardDescription>Grant geographic/facility notice publishing &amp; k-suppressed reporting scope.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!scopeUserId) return;
+                      setBusy(true);
+                      try {
+                        await opsService.createAuthorityScope({
+                          user_id: scopeUserId,
+                          assigned_emirates: scopeEmirates.split(",").map((s) => s.trim()).filter(Boolean),
+                          can_publish: true,
+                          can_view_reports: true,
+                          min_suppression_k: 5,
+                        });
+                        pushToast("Authority scope assigned", "success");
+                        await loadAdmin();
+                      } catch (err) {
+                        pushToast("Failed to assign scope", "error", err instanceof Error ? err.message : undefined);
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                    className="flex flex-wrap items-end gap-3"
+                  >
+                    <div className="w-64 space-y-1">
+                      <Label>User</Label>
+                      <Select value={scopeUserId} onChange={(e) => setScopeUserId(e.target.value)} required>
+                        <option value="">Select user...</option>
+                        {users.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.full_name} ({u.email})
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className="w-60 space-y-1">
+                      <Label>Assigned Emirates (comma-separated)</Label>
+                      <Input value={scopeEmirates} onChange={(e) => setScopeEmirates(e.target.value)} placeholder="Abu Dhabi, Dubai" />
+                    </div>
+                    <Button type="submit" disabled={busy}>Assign Scope</Button>
+                  </form>
+                  {authorityScopes.length > 0 && (
+                    <div className="space-y-1.5 text-xs">
+                      {authorityScopes.map((sc) => (
+                        <div key={sc.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                          <span>
+                            User <code className="font-mono">{sc.user_id.slice(0, 8)}</code> · Emirates:{" "}
+                            <strong>{sc.assigned_emirates.join(", ") || "All"}</strong> · k≥{sc.min_suppression_k}
+                          </span>
+                          <Badge variant={sc.is_active ? "outline" : "secondary"}>{sc.is_active ? "Active" : "Revoked"}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -391,7 +526,12 @@ function AdminPageContent() {
                           <TableCell className="text-xs font-semibold">{o.name}</TableCell>
                           <TableCell className="font-mono text-xs">{o.slug}</TableCell>
                           <TableCell className="text-xs">{formatLabel(o.org_type)}</TableCell>
-                          <TableCell className="text-xs uppercase">{o.enabled_tracks.join(", ")}</TableCell>
+                          <TableCell className="text-xs uppercase">
+                            {o.primary_programme || o.enabled_tracks.join(", ")}
+                            {o.programme_configuration_status === "pending_selection" && (
+                              <Badge variant="outline" className="ml-1.5 text-[10px]">Pending</Badge>
+                            )}
+                          </TableCell>
                           <TableCell className="text-right">
                             {isActive ? (
                               <Badge variant="outline">Active</Badge>

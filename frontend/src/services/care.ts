@@ -86,6 +86,10 @@ export const careService = {
     return api.post(`/referrals/${referralId}/book`, payload);
   },
 
+  cancelReferral(referralId: string, reason: string): Promise<Referral> {
+    return api.post(`/referrals/${referralId}/cancel`, { reason });
+  },
+
   completeConsultation(referralId: string, notes?: string): Promise<Referral> {
     return api.post(`/referrals/${referralId}/complete-consultation`, { notes });
   },

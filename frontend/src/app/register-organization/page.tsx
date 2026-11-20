@@ -1,11 +1,16 @@
 "use client";
 
-import React, { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import React, { Suspense, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { OrganizationOnboardingCard } from "@/components/OrganizationOnboardingCard";
 
-export default function RegisterOrganizationPage() {
+function RegisterOrganizationContent() {
+  const programme = useSearchParams().get("programme");
+  const initialProgramme =
+    programme === "loop" || programme === "neuro" || programme === "worksafe"
+      ? programme
+      : "core";
   const { session, loading, needsBootstrap } = useAuth();
   const router = useRouter();
 
@@ -25,5 +30,25 @@ export default function RegisterOrganizationPage() {
     );
   }
 
-  return <OrganizationOnboardingCard mode="register" />;
+  return (
+    <OrganizationOnboardingCard
+      mode="register"
+      initialProgramme={initialProgramme}
+      key={initialProgramme}
+    />
+  );
+}
+
+export default function RegisterOrganizationPage() {
+  return (
+    <Suspense
+      fallback={
+        <p className="p-8 text-sm text-slate-600">
+          Preparing your workspace setup...
+        </p>
+      }
+    >
+      <RegisterOrganizationContent />
+    </Suspense>
+  );
 }

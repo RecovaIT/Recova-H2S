@@ -3,7 +3,10 @@
 import React, { Suspense, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { Eye, EyeOff } from "lucide-react";
 import { authService } from "@/services/auth";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { useLanguage } from "@/hooks/useLanguage";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,8 +14,10 @@ import { Input, Label } from "@/components/ui/input";
 
 function ResetPasswordInner() {
   const sp = useSearchParams();
-  const [token, setToken] = useState(sp.get("token") || "");
+  const token = sp.get("token") || "";
   const [newPassword, setNewPassword] = useState("");
+  const [confirmation,setConfirmation] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -22,6 +27,7 @@ function ResetPasswordInner() {
     setError(null);
     setBusy(true);
     try {
+      if(newPassword!==confirmation)throw new Error("Passwords do not match");
       const res = await authService.confirmPasswordReset(token.trim(), newPassword);
       setDone(res.message);
     } catch (err) {
@@ -42,15 +48,32 @@ function ResetPasswordInner() {
           </Link>
         </Alert>
       )}
+      {!token && <Alert variant="danger">Open the private setup or reset link in your email. You can request a new link from Password Recovery.</Alert>}
       <div className="space-y-1">
-        <Label>Reset Token</Label>
-        <Input required value={token} onChange={(e) => setToken(e.target.value)} />
+        <Label htmlFor="reset-new-password">New Strong Password (min 10 chars)</Label>
+        <div className="relative">
+          <Input
+            id="reset-new-password"
+            type={showPassword ? "text" : "password"}
+            required
+            minLength={10}
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            className="pr-10"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((prev) => !prev)}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+            aria-label={showPassword ? "Hide input" : "Reveal input"}
+            title={showPassword ? "Hide input" : "Reveal input"}
+          >
+            {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+        </div>
       </div>
-      <div className="space-y-1">
-        <Label>New Strong Password (min 10 chars)</Label>
-        <Input type="password" required minLength={10} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-      </div>
-      <Button type="submit" disabled={busy} className="w-full">
+      <div className="space-y-1"><Label htmlFor="reset-confirm-password">Confirm new password</Label><Input id="reset-confirm-password" type="password" autoComplete="new-password" required value={confirmation} onChange={e=>setConfirmation(e.target.value)}/></div>
+      <Button type="submit" disabled={busy || !token || Boolean(done)} className="w-full">
         {busy ? "Updating..." : "Set New Password"}
       </Button>
     </form>
@@ -58,12 +81,19 @@ function ResetPasswordInner() {
 }
 
 export default function ResetPasswordPage() {
+  const { tr } = useLanguage();
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-slate-100 p-4">
+      <LanguageSwitcher variant="floating" />
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Confirm Password Reset</CardTitle>
-          <CardDescription>Apply your reset token and set a new strong password.</CardDescription>
+          <CardTitle>{tr("Confirm Password Reset", "تأكيد إعادة تعيين كلمة المرور")}</CardTitle>
+          <CardDescription>
+            {tr(
+              "Choose your private password. This email link can only be used once.",
+              "اختر كلمة مرور خاصة بك. يمكن استخدام هذا الرابط لمرة واحدة فقط."
+            )}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Suspense fallback={<p className="text-xs text-slate-500">Loading form...</p>}>

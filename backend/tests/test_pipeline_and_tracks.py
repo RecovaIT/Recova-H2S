@@ -174,6 +174,7 @@ def test_core_end_to_end_closed_loop_and_fhir(client: TestClient):
     assert ref_final["outcome_verification"]["outcome"] == "improved"
 
     # 10. Export and validate HL7 FHIR R4 Bundle
+    client.post('/api/v1/consents', headers=h, json={'patient_id':pid, 'scope':'hie_sharing'}).raise_for_status()
     fhir = client.get(f"/api/v1/fhir/patients/{pid}/bundle").json()
     assert fhir["validation"]["valid"] is True
     assert fhir["validation"]["resource_counts"]["Patient"] == 1

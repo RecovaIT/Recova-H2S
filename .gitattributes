@@ -1,2 +1,5 @@
 # Preserve generated PDFs byte for byte across platforms.
 *.pdf binary
+*.sh text eol=lf
+*.conf text eol=lf
+Dockerfile* text eol=lf

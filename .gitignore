@@ -25,6 +25,7 @@ next-env.d.ts
 
 # Env / secrets
 .env
+.env.vps
 .env.local
 .env.*.local
 backend/.env

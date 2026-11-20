@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { FileCode2, Play, RotateCcw, ShieldCheck } from "lucide-react";
+import { FileCode2, MailPlus, Play, RotateCcw, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { engineService } from "@/services/engine";
 import { patientsService } from "@/services/patients";
@@ -40,6 +40,7 @@ const CONSENT_SCOPES: ConsentScope[] = [
   "family_notification",
   "hie_sharing",
   "supervisor_identifiable",
+  "optional_channels",
 ];
 
 export default function PatientDetailPage() {
@@ -183,6 +184,29 @@ export default function PatientDetailPage() {
     }
   };
 
+  const handleIssuePortalInvite = async () => {
+    const email = window.prompt("Enter participant recipient email for the 72h portal invitation:");
+    if (!email || !email.includes("@")) {
+      if (email !== null) {
+        pushToast("Valid email required", "error", "Enter a valid recipient email to bind the portal invitation.");
+      }
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await patientsService.issuePortalInvitation(patientId, email.trim());
+      pushToast(
+        `Portal invitation saved for ${res.organization_name || "facility"} (72h expiry)`,
+        "info",
+        res.delivery_status === "not_configured" ? "Configure the server SMTP sender and retry from account email deliveries." : `Email status: ${res.delivery_status}. Track delivery in Administration.`
+      );
+    } catch (err) {
+      pushToast("Could not issue invitation", "error", err instanceof Error ? err.message : undefined);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const fullName = patient ? `${patient.given_name} ${patient.family_name}` : "Participant Chart";
 
   return (
@@ -192,6 +216,11 @@ export default function PatientDetailPage() {
         subtitle={patient ? `MRN ${patient.mrn} · ${formatLabel(patient.participant_type)} · Registered ${formatDate(patient.created_at)}` : "Loading chart..."}
         actions={
           <div className="flex flex-wrap gap-2">
+            {hasPermission("patients:write") && patient && (
+              <Button size="sm" variant="outline" onClick={() => void handleIssuePortalInvite()} disabled={busy}>
+                <MailPlus className="h-4 w-4" /> Issue Portal Invite
+              </Button>
+            )}
             {hasPermission("fhir:export") && patient && (
               <Button size="sm" variant="outline" onClick={() => setFhirOpen(true)}>
                 <FileCode2 className="h-4 w-4" /> FHIR R4 Bundle

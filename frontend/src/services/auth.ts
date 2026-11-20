@@ -2,10 +2,19 @@ import { api, clearCsrfToken, setCsrfToken } from "@/lib/api";
 import type { SessionResponse } from "@/types/recova";
 
 export interface BootstrapPayload {
+  bootstrap_setup_token?: string;
   organization_name: string;
   organization_slug: string;
   org_type: "clinic" | "rehab_center" | "public_health" | "employer" | "hospital";
+  primary_programme?: string;
   enabled_tracks: string[];
+  country?: string;
+  emirate?: string;
+  idempotency_key?: string;
+  service_setup?: Record<string, unknown>;
+  responsible_contact?: Record<string, unknown>;
+  permitted_channels?: string[];
+  participation_consent?: Record<string, unknown>;
   admin_email: string;
   admin_full_name: string;
   admin_password: string;
@@ -66,7 +75,7 @@ export const authService = {
     return res;
   },
 
-  async requestPasswordReset(email: string): Promise<{ message: string; reset_token?: string }> {
+  async requestPasswordReset(email: string): Promise<{ accepted: boolean; message: string }> {
     return api.post("/auth/password-reset/request", { email });
   },
 
@@ -76,5 +85,15 @@ export const authService = {
 
   async changePassword(current_password: string, new_password: string): Promise<{ message: string }> {
     return api.post("/auth/change-password", { current_password, new_password });
+  },
+
+  async completePortalInvitation(payload: {token:string; new_password:string; full_name:string}): Promise<SessionResponse> {
+    const res = await api.post<SessionResponse>("/auth/complete-portal-invitation", payload);
+    setCsrfToken(res.csrf_token);
+    return res;
+  },
+
+  async acceptPortalInvitation(token: string): Promise<{ message: string }> {
+    return api.post("/auth/accept-portal-invitation", { token });
   },
 };

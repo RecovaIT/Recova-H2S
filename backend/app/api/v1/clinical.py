@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
+from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 
 from app.api.deps import AuthContext, requires, requires_track
@@ -86,6 +87,85 @@ def update_patient(patient_id: uuid.UUID, req: PatientUpdate, ctx: AuthContext =
 @patients_router.post("/{patient_id}/enrollments", response_model=EnrollmentOut)
 def enroll_patient(patient_id: uuid.UUID, req: EnrollmentCreate, ctx: AuthContext = Depends(requires(P.PATIENTS_WRITE))):
     return pat_svc.enroll_track(ctx, patient_id, req)
+
+
+class PortalInvitationCreate(BaseModel):
+    recipient_email: EmailStr
+
+
+@patients_router.post("/{patient_id}/portal-invitations", status_code=201)
+def create_portal_invitation(
+    patient_id: uuid.UUID,
+    recipient_email: EmailStr | None = Query(default=None),
+    body: PortalInvitationCreate | None = Body(default=None),
+    ctx: AuthContext = Depends(requires(P.PATIENTS_WRITE)),
+):
+    """Issue a single-use, expiring, recipient-bound portal invitation (stored as token hash)."""
+    from datetime import timedelta
+    from app.core.errors import ValidationFailed
+    from app.core.security import hash_token, new_token
+    from app.models.base import utcnow
+    from app.models.identity import PortalInvitation
+
+    email_val = (str(body.recipient_email) if body is not None else (str(recipient_email) if recipient_email else "")).strip().lower()
+    if not email_val:
+        raise ValidationFailed("recipient_email is required")
+
+    detail = pat_svc.get_patient(ctx, patient_id)
+    now = utcnow()
+    # Invalidate any prior unused invitations for this patient
+    prior = ctx.db.scalars(
+        select(PortalInvitation).where(
+            PortalInvitation.patient_id == detail.id,
+            PortalInvitation.organization_id == ctx.org_id,
+            PortalInvitation.accepted_at.is_(None),
+            PortalInvitation.revoked_at.is_(None),
+        )
+    ).all()
+    for inv in prior:
+        inv.revoked_at = now
+
+    raw_token = new_token(32)
+    expires_at = now + timedelta(hours=72)
+    inv = PortalInvitation(
+        organization_id=ctx.org_id,
+        patient_id=detail.id,
+        recipient_email=email_val,
+        token_hash=hash_token(raw_token),
+        purpose="portal_link",
+        expires_at=expires_at,
+        created_by_id=ctx.user.id,
+    )
+    ctx.db.add(inv)
+    ctx.db.flush()
+    from app.services.messaging import queue_email, public_link
+    from app.core.config import get_settings
+    from app.models.messaging import EmailDelivery
+    # A replacement invitation invalidates queued copies of the previous link.
+    for old in ctx.db.scalars(select(EmailDelivery).where(EmailDelivery.organization_id == ctx.org_id, EmailDelivery.category == 'portal_invitation', EmailDelivery.idempotency_key.in_([f'portal-invite:{i.id}' for i in prior]))):
+        if old.status != 'sent':
+            old.status = 'cancelled'
+    invitation_url = public_link('/accept-invitation', token=raw_token)
+    delivery = queue_email(ctx.db,to=email_val,subject='Your Recova patient portal invitation',
+        body=f'Your facility, {ctx.organization.name}, has invited you to your patient portal.\nOpen your private setup link:\n{invitation_url}\nIt expires in 72 hours. Existing users sign in with their current password.',
+        category='portal_invitation',organization_id=ctx.org_id,key=f'portal-invite:{inv.id}',expires_at=expires_at)
+    ctx.audit("patient.portal_invitation.issue", "portal_invitation", inv.id, patient_id=detail.id, details={"patient_id": str(detail.id)})
+    ctx.db.commit()
+    primary_prog = ctx.organization.primary_programme if ctx.organization else None
+    return {
+        "invitation_id": str(inv.id),
+        "patient_id": str(detail.id),
+        "organization_id": str(ctx.org_id),
+        "organization_name": ctx.organization.name if ctx.organization else None,
+        "primary_programme": primary_prog,
+        "recipient_email": inv.recipient_email,
+        "purpose": inv.purpose,
+        "expires_at": inv.expires_at,
+        "invitation_token": raw_token if get_settings().environment != 'production' else None,
+        "delivery_status": delivery.status,
+        "delivery_id": str(delivery.id),
+        "invitation_url": invitation_url if get_settings().environment != 'production' else None,
+    }
 
 
 @patients_router.get("/{patient_id}/passport")

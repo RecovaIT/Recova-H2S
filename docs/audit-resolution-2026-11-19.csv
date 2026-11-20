@@ -1,0 +1,27 @@
+id,status,change_or_remaining_work
+F01,Implemented by team,Authority scope ownership and recipient eligibility controls retained; unified backend tests cover scoped access
+F02,Implemented,Facility suspension no longer disables the global user; platform accounts protected
+F03,Implemented,Staff permission and active membership checked for WebSocket and SSE; long connections reauthorize
+F04,Implemented,Clinical review rejects mismatched patient track and run/referral links
+F05,Implemented,Referral actions enforce their order; coordinator proposals require clinical approval
+F06,Implemented,Minimal emergency-only check-in allowed under configured exception without routine metrics
+F07,Implemented,Supervisor individual access blocked even with permission overrides
+F08,Implemented,Staff activation emails and resend/status UI; actual sender configuration still needed
+F09,Implemented,New and existing patient invitation journeys with expiring recipient-bound setup links
+F10,Implemented,Recovery UI matches private generic API contract; passwords set from one-time links
+F11,Implemented by team,Programme approval cannot be bypassed by general organisation PATCH
+F12,Implemented by team,Live Authority notices and eligible recipient acknowledgement retained
+F13,Implemented,Explicit acknowledgement and distinct final submit; persisted onboarding data retained
+F14,Implemented plus configuration,Real SMTP connection test and trusted origin checks; operator must configure sender
+F15,Implemented plus clinical verification,Licence required and decision signature stored; independent credential verification is a clinical-owner task
+F16,Implemented,Patient directory and detail require explicit PHI permission
+F17,Implemented,Welcome verification membership and password security emails queued; mandatory verified-email login policy is not enabled
+F18,Implemented,Generic recovery response; sibling tokens cancelled; password reset revokes sessions
+F19,Implemented; load verification pending,Selected run refresh fixed; team PostgreSQL event transport retained; production multi-worker load test remains
+F20,Implemented plus delivery verification,Patient care details and state updates; cancellation booking confirmations and idempotent reminders
+F21,Partial,Durable encrypted email queue retries and SMTP-acceptance status done; channel-wide SMS/WhatsApp/HIE retry and provider receipt engineering remains
+F22,Partial,Finish Arabic UI translations and RTL review; implement/validate device OAuth for required providers; obtain clinical evidence through planned pilot
+F23,Partial,Public host and DB readiness respond; production still needs operator initialization deployed release provider checks and authenticated smoke tests
+F24,Addressed with explicit limits,Fresh browser signup invitation and check-in verified; synthetic directory exclusion explained; seeded accounts remain synthetic fixtures rather than proof of delivery
+F25,New finding implemented,Production bootstrap protected by server-held setup secret; first public signup blocked until initialization; operator must deploy this protection
+F26,New finding implemented,Patient registration consent choices default off; wearable and AI choices separated; recording prior permissions requires a consent evidence reference

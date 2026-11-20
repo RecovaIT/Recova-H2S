@@ -16,6 +16,7 @@ const participant = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.localStorage.clear();
   vi.mocked(api.get).mockResolvedValue(participant);
   vi.mocked(api.post).mockResolvedValue({ emergency: false });
 });
@@ -64,5 +65,60 @@ describe("Participant programme journeys", () => {
     await user.click(screen.getByRole("button", { name: "Your profile and privacy" }));
     await user.click(screen.getByRole("switch", { name: "Wearable readings" }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith("/portal/consents", { scope: "wearable_ingestion", granted: false }));
+  });
+
+  it("switches to full Arabic UI with dir=rtl across patient journeys and restores English LTR", async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.startsWith("/portal/care")) {
+        return {
+          enrolment_id: "enr-1",
+          track: "core",
+          released_instructions: [
+            {
+              id: "inst-1",
+              source: "clinical_review",
+              decision: "modify_plan",
+              summary_en: "Continue hydration and rest.",
+              summary_ar: "استمر في شرب الماء وأخذ قسط كافٍ من الراحة.",
+            },
+          ],
+          appointments: [],
+          interventions: [],
+        };
+      }
+      return participant;
+    });
+    const user = userEvent.setup();
+    const { container } = render(<ParticipantPortal />);
+    await screen.findByRole("heading", { name: "Hello, Amara" });
+
+    // Switch to Arabic
+    await user.click(screen.getByRole("button", { name: "Switch portal language to Arabic" }));
+    const root = container.querySelector(".patient-app");
+    expect(root).toHaveAttribute("dir", "rtl");
+    expect(root).toHaveAttribute("lang", "ar");
+    expect(screen.getByRole("heading", { name: "مرحباً، Amara" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "تنقل المريض" })).toBeInTheDocument();
+
+    // Check-in tab in Arabic
+    await user.click(screen.getByRole("button", { name: "التسجيل اليومي" }));
+    expect(screen.getByRole("heading", { name: "تأملك اليومي" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "إرسال إلى فريق الرعاية" })).toBeInTheDocument();
+
+    // Care tab in Arabic shows RTL clinical summary cleanly
+    await user.click(screen.getByRole("button", { name: "رعايتي" }));
+    const arSummary = await screen.findByText("استمر في شرب الماء وأخذ قسط كافٍ من الراحة.");
+    expect(arSummary).toHaveAttribute("dir", "rtl");
+
+    // Profile tab shows Arabic consents + Arabic Account Security section
+    await user.click(screen.getByRole("button", { name: "حسابي" }));
+    expect(screen.getByRole("heading", { name: "أمان الحساب" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "قراءات الأجهزة القابلة للارتداء" })).toBeInTheDocument();
+
+    // Restore English LTR
+    await user.click(screen.getByRole("button", { name: "التبديل إلى اللغة الإنجليزية" }));
+    expect(root).toHaveAttribute("dir", "ltr");
+    expect(root).toHaveAttribute("lang", "en");
+    expect(screen.getByRole("heading", { name: "Account security" })).toBeInTheDocument();
   });
 });

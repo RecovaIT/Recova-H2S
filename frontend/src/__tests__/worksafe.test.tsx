@@ -12,7 +12,7 @@ vi.mock("@/services/auth", () => ({
       user: { id: "u2", email: "sup@recova.ae", full_name: "Supervisor Sam", is_active: true, is_platform_admin: false, preferred_language: "en", created_at: "2026-01-01" },
       active_organization: { id: "o1", name: "Yard", slug: "yard", org_type: "employer", enabled_tracks: ["worksafe"], is_active: true, settings: {}, created_at: "2026-01-01" },
       role: "supervisor",
-      permissions: ["workforce:read_aggregate", "interventions:read", "interventions:write"],
+      permissions: ["org:read", "workforce:read_aggregate"],
       tracks: ["worksafe"],
       memberships: [],
     }),

@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.auth import router as auth_router
+from app.api.v1.account_setup import router as account_setup_router
+from app.api.v1.authority import authority_router, notices_router
 from app.api.v1.care import (
     interventions_router,
     notifications_router,
@@ -23,6 +25,7 @@ from app.api.v1.clinical import (
     workforce_router,
 )
 from app.api.v1.engine import agents_router, baselines_router, pipeline_router, scoring_router
+from app.api.v1.i18n import router as i18n_router
 from app.api.v1.ops import benchmarks_router, fhir_router, reports_router, settings_router
 from app.api.v1.orgs_users import audit_router, orgs_router, users_router
 from app.api.v1.portal import router as portal_router
@@ -30,6 +33,7 @@ from app.api.v1.portal import router as portal_router
 api_v1_router = APIRouter()
 for r in [
     auth_router,
+    account_setup_router,
     orgs_router,
     users_router,
     patients_router,
@@ -55,5 +59,8 @@ for r in [
     settings_router,
     reports_router,
     portal_router,
+    notices_router,
+    authority_router,
+    i18n_router,
 ]:
     api_v1_router.include_router(r)

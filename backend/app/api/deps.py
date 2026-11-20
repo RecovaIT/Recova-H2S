@@ -183,6 +183,9 @@ def get_auth_context(request: Request, db: Session = Depends(get_db)) -> AuthCon
             else:
                 org = None  # membership revoked since session started
     perms, tracks = resolve_permissions(db, org, role, user.is_platform_admin)
+    from app.services.auth import _participant_enrolments_for_user
+    if _participant_enrolments_for_user(db, user):
+        perms.add(P.PORTAL_SELF)
     return AuthContext(
         db=db,
         user=user,

@@ -16,6 +16,7 @@ export type Role =
   | "screening_coordinator"
   | "occ_health_director"
   | "supervisor"
+  | "authority_user"
   | "patient";
 
 export type ConsentScope =
@@ -24,7 +25,8 @@ export type ConsentScope =
   | "llm_synthesis"
   | "family_notification"
   | "hie_sharing"
-  | "supervisor_identifiable";
+  | "supervisor_identifiable"
+  | "optional_channels";
 
 export type StepStatus =
   | "waiting"
@@ -79,6 +81,8 @@ export interface Organization {
   name: string;
   slug: string;
   org_type: string;
+  primary_programme?: string | null;
+  programme_configuration_status?: string;
   enabled_tracks: string[];
   is_active: boolean;
   country?: string | null;
@@ -86,6 +90,55 @@ export interface Organization {
   settings: Record<string, unknown>;
   data_retention_days?: number | null;
   created_at: string;
+}
+
+export interface ProgrammeRequest {
+  id: string;
+  organization_id: string;
+  organization_name?: string | null;
+  requested_programme: Track;
+  justification: string;
+  status: "pending" | "approved" | "rejected";
+  requested_by_id?: string | null;
+  reviewed_by_id?: string | null;
+  reviewed_at?: string | null;
+  review_note?: string | null;
+  created_at: string;
+}
+
+export interface PlatformSubEngineCenter {
+  id: string;
+  name: string;
+  slug: string;
+  org_type: string;
+  emirate?: string | null;
+  primary_programme?: string | null;
+  active_patients: number;
+  staff_members: number;
+  total_runs: number;
+  open_emergencies: number;
+  risk_distribution: Record<string, number>;
+}
+
+export interface PlatformSubEngineSummary {
+  track: Track;
+  total_centers: number;
+  total_patients: number;
+  total_staff: number;
+  total_runs: number;
+  open_emergencies: number;
+  risk_distribution: Record<string, number>;
+  centers: PlatformSubEngineCenter[];
+}
+
+export interface PlatformOverviewReport {
+  total_centers: number;
+  total_active_patients: number;
+  total_staff_members: number;
+  total_pipeline_runs: number;
+  open_emergencies: number;
+  sub_engines: Record<Track, PlatformSubEngineSummary>;
+  agent_telemetry: Record<string, Record<string, number>>;
 }
 
 export interface Membership {
@@ -102,6 +155,7 @@ export interface Membership {
 export interface User {
   id: string;
   email: string;
+  email_verified_at?: string | null;
   full_name: string;
   is_active: boolean;
   is_platform_admin: boolean;
@@ -115,14 +169,87 @@ export interface UserWithMemberships extends User {
   memberships: Membership[];
 }
 
+export interface ParticipantEnrolmentContext {
+  enrolment_id: string;
+  patient_id: string;
+  organization_id: string;
+  organization_name?: string | null;
+  programme: string;
+  track: string;
+  status: string;
+}
+
 export interface SessionResponse {
   user: User;
   active_organization: Organization | null;
   role: string | null;
+  primary_programme?: string | null;
+  programme_configuration_status?: string | null;
   permissions: string[];
   tracks: string[];
+  capability_flags?: Record<string, boolean>;
+  active_enrolment?: ParticipantEnrolmentContext | null;
+  participant_enrolments?: ParticipantEnrolmentContext[];
   memberships: Membership[];
   csrf_token?: string | null;
+}
+
+export interface AuthorityScope {
+  id: string;
+  user_id: string;
+  organization_id?: string | null;
+  assigned_emirates: string[];
+  assigned_facility_ids: string[];
+  can_publish: boolean;
+  can_view_reports: boolean;
+  min_suppression_k: number;
+  is_active: boolean;
+}
+
+export interface AuthorityNotice {
+  id: string;
+  title: string;
+  message: string;
+  plain_language_action?: string | null;
+  issuer: string;
+  category: string;
+  severity: "info" | "advisory" | "urgent";
+  scope_emirate?: string | null;
+  facility_ids?: string[];
+  eligible_programmes: string[];
+  acknowledgement_required: boolean;
+  status: "draft" | "published" | "expired" | "withdrawn";
+  version: number;
+  starts_at?: string | null;
+  published_at?: string | null;
+  expires_at?: string | null;
+  withdrawn_at?: string | null;
+  acknowledgement_count: number;
+  read_count?: number;
+  acknowledged?: boolean;
+  recipient_state?: "available" | "read" | "acknowledged" | string | null;
+  read_at?: string | null;
+  acknowledged_at?: string | null;
+}
+
+export interface AuthorityReport {
+  k_threshold: number;
+  scoped_organization_count: number;
+  programme_summary: Record<
+    string,
+    { participant_count: number | null; suppressed_k_anonymity: boolean; k_threshold: number }
+  >;
+  notice_summaries: Array<{
+    notice_id: string;
+    title: string;
+    status: string;
+    version: number;
+    scope_emirate?: string | null;
+    suppressed_k_anonymity: boolean;
+    recipient_count: number | null;
+    read_count: number | null;
+    acknowledgement_count: number | null;
+  }>;
 }
 
 export interface Enrollment {
@@ -135,6 +262,8 @@ export interface Enrollment {
   latest_risk_tier?: string | null;
   latest_run_id?: string | null;
   latest_run_at?: string | null;
+  authority_reason?: string | null;
+  history?: Array<Record<string, unknown>>;
 }
 
 export interface PatientSummary {
@@ -175,6 +304,8 @@ export interface Consent {
   scope: ConsentScope | string;
   status: "granted" | "revoked" | string;
   method: string;
+  policy_version?: string;
+  authority_to_act?: string;
   granted_by_name?: string | null;
   effective_at: string;
   expires_at?: string | null;

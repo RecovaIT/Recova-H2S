@@ -1,0 +1,20 @@
+# Governance review | Claims and release actions
+Reviewed: docs/clinical-governance.md and relevant source on the integrated release
+
+| Priority / finding | Evidence and required wording or action |
+| --- | --- |
+| High: HIE consent | Review found a historical-revocation check that did not require an active grant. Integration now uses the shared effective-consent evaluator. Regression checks cover absent, future, expired, revoked and re-granted consent for export/push. Still verify external integration and cross-tenant deployment behaviour before making wider claims. |
+| High: live graph | Frontend event subscriptions did not match backend agent.step_started, agent.step_finished, pipeline.finished and pipeline.emergency_bypass. Integration corrects these names. The bus remains in-process; a separate worker/API topology needs shared transport or a verified persisted-state refresh. Do not claim live cross-process streaming until tested. |
+| High: review credentials | Clinical review records a reviewer identity, optional licence field and SHA-256 hash. Say audit-linked review record. A payload hash does not establish verified professional licensing, a certified digital signature or tamper-proof storage. |
+| High: compliance | Engineering rules express UAE compliance and sovereignty requirements. They are requirements, not certification evidence. Say designed with consent and role controls; deployment location, encryption coverage, logs, backups and applicable approvals require independent review before patient use. |
+| Medium: FHIR | Say FHIR R4-oriented bundle builder with local structural/reference checks. Do not say standards-compliant or Malaffi-ready without official profile validation, terminology validation and destination acceptance. Identifiers supplied by an operator do not prove regional-system connectivity. |
+| Medium: delivery | Say provider accepted when an external API accepts a request. Acceptance is not delivery, patient read or a clinical outcome; retain separate provider callbacks, read acknowledgements and human outcome records. |
+| Medium: model claims | Six gated workflow stages include deterministic processing plus optional LLM synthesis. Do not imply six independent LLMs. If the provider is absent, show not configured. Bilingual schema fields alone do not demonstrate Arabic clinical quality. |
+| Medium: effectiveness | Synthetic benchmark pass rates are fixture agreement only. Do not claim relapse prediction lead time, reduced relapse rates, validated diagnostic accuracy or measured time savings without an appropriate study. |
+| Medium: devices and programmes | File-based wearable imports are implemented; direct provider integrations require configuration and verification. Patient memory sessions are practice. Authority-notice code is not evidence of government adoption or production operation. |
+
+Suggested replacement introduction: Recova implements a prototype of consent-gated processing, deterministic risk analysis, optional AI drafting, role-scoped access and clinician review. These controls support evaluation; they do not establish regulatory compliance, validated clinical effectiveness or certified interoperability.
+
+Preserve accurate details: Agent 5 must not change deterministic risk or approve care. A referral notification is not a completed consultation. A completed consultation is not a verified improvement. Keep missing-data explanations visible and require responsible clinical staff to confirm emergency workflows.
+
+Proposed owners: Asiyah coordinates claim wording and evidence; CTO/backend owner validates consent, tenant isolation, credentials, integrations and deployment; frontend owners validate live state, mobile access and Arabic presentation; CEO approves only the supported final narrative. These are requested handoffs, not confirmations that owners have accepted them.

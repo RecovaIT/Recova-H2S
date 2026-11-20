@@ -27,6 +27,7 @@ import { AgentExecutionGraph } from "@/components/AgentExecutionGraph";
 import { DecideAiReviewWorkspace } from "@/components/DecideAiReviewWorkspace";
 import { LongitudinalTrendChart } from "@/components/LongitudinalTrendChart";
 import { RiskBadge } from "@/components/RiskBadge";
+import { SubEngineSummaryBanner } from "@/components/SubEngineSummaryBanner";
 
 interface KeyPadSpec {
   id: number;
@@ -190,8 +191,8 @@ export function NeuroActivityGame() {
         const rt = Math.max(50, nowTimestampMs() - phaseStartRef.current);
         const correct = next.every((val, i) => val === targetSeq[i]);
         const recorded: CognitiveTrialInput = {
-          task_type: phase === "seq4_input" ? "sequence_4key" : "sequence_6key",
-          modality: "audiovisual",
+          task_type: phase === "seq4_input" ? "visual_memory" : "audio_memory",
+          modality: phase === "seq4_input" ? "visual" : "auditory",
           expected: targetSeq,
           response: next,
           reaction_time_ms: Number(rt.toFixed(1)),
@@ -302,6 +303,7 @@ export function NeuroActivityGame() {
 
   return (
     <div className="space-y-6">
+      <SubEngineSummaryBanner track="neuro" />
       <Alert variant="warning" title="Non-Diagnostic Early Brain Health & Cognitive Wellness Screening">
         Recova Neuro monitors within-person longitudinal cognitive reaction-time &amp; accuracy shifts adjusted for education, language match, hearing/vision, and session practice effects. It is not a standalone diagnostic tool for dementia.
       </Alert>
@@ -369,7 +371,7 @@ export function NeuroActivityGame() {
               )}
             </CardTitle>
             <CardDescription>
-              Stages: (1) 4-Key Sequence → (2) 6-Key Sequence → (3) Executive Rule Switching → (4) Delayed Recall of First Sequence.
+              Stages: (1) Visual Sequence Memory (4-key) → (2) Auditory Tone Sequence (6-key) → (3) Executive Rule Switching → (4) Delayed Recall of Stage 1.
             </CardDescription>
           </CardHeader>
 
@@ -388,12 +390,12 @@ export function NeuroActivityGame() {
             {phase !== "idle" && phase !== "complete" && (
               <div className="space-y-4">
                 <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-center text-sm font-semibold text-violet-950">
-                  {phase === "seq4_show" && "Watch and listen closely to the 4-key sequence..."}
-                  {phase === "seq4_input" && `Tap the ${targetSeq.length} highlighted keys in order (${userSeq.length}/${targetSeq.length})`}
-                  {phase === "seq6_show" && "Watch and listen closely to the 6-key sequence..."}
-                  {phase === "seq6_input" && `Tap the ${targetSeq.length} keys in order (${userSeq.length}/${targetSeq.length})`}
-                  {phase === "rule_switch" && `Rule Switch (${ruleRound + 1}/${ruleTargets.length}): ${ruleTargets[ruleRound].cue}`}
-                  {phase === "delayed_recall" && `Delayed Recall: Repeat the VERY FIRST ${recallAnchorSeq.length}-key sequence from Stage 1 (${userSeq.length}/${recallAnchorSeq.length})`}
+                  {phase === "seq4_show" && "Stage 1 (Visual): Watch the 4-key visual pattern closely..."}
+                  {phase === "seq4_input" && `Stage 1 (Visual): Tap the ${targetSeq.length} keys in pattern order (${userSeq.length}/${targetSeq.length})`}
+                  {phase === "seq6_show" && "Stage 2 (Auditory): Listen carefully to the tone pitches..."}
+                  {phase === "seq6_input" && `Stage 2 (Auditory): Tap the ${targetSeq.length} keys corresponding to tone pitch (${userSeq.length}/${targetSeq.length})`}
+                  {phase === "rule_switch" && `Stage 3 (Executive): Rule Switch (${ruleRound + 1}/${ruleTargets.length}): ${ruleTargets[ruleRound].cue}`}
+                  {phase === "delayed_recall" && `Stage 4 (Recall): Delayed Recall — Repeat the Stage 1 visual sequence (${userSeq.length}/${recallAnchorSeq.length})`}
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

@@ -1,6 +1,9 @@
 import { api } from "@/lib/api";
 import type {
   AuditEvent,
+  AuthorityNotice,
+  AuthorityReport,
+  AuthorityScope,
   BenchmarkRun,
   BenchmarkRunDetail,
   CareFacility,
@@ -10,6 +13,8 @@ import type {
   Organization,
   OverviewReport,
   Page,
+  PlatformOverviewReport,
+  ProgrammeRequest,
   ReferralPathway,
   RolePermissionView,
   Track,
@@ -29,11 +34,19 @@ export const opsService = {
     name: string;
     slug: string;
     org_type: string;
+    primary_programme?: Track;
     enabled_tracks: Track[];
     country?: string;
     emirate?: string;
   }): Promise<Organization> {
     return api.post("/organizations", payload);
+  },
+
+  selectPrimaryProgramme(
+    orgId: string,
+    payload: { primary_programme: Track; reason?: string; restrict_to_primary?: boolean }
+  ): Promise<Organization> {
+    return api.post(`/organizations/${orgId}/select-primary-programme`, payload);
   },
 
   updateOrganization(
@@ -80,9 +93,10 @@ export const opsService = {
     full_name: string;
     role: string;
     password?: string;
+      send_activation_email?: boolean;
     preferred_language?: "en" | "ar";
     license_number?: string;
-  }): Promise<{ user: UserWithMemberships; activation_token?: string }> {
+    }): Promise<{ user: UserWithMemberships; activation?: {status:string;id?:string} | null }> {
     return api.post("/users", payload);
   },
 
@@ -199,5 +213,115 @@ export const opsService = {
 
   testIntegration(name: string): Promise<Record<string, unknown>> {
     return api.post(`/settings/integrations/${name}/test`);
+  },
+
+  getPlatformOverview(): Promise<PlatformOverviewReport> {
+    return api.get("/reports/platform-overview");
+  },
+
+  listProgrammeRequests(): Promise<ProgrammeRequest[]> {
+    return api.get("/organizations/programme-requests");
+  },
+
+  createProgrammeRequest(payload: {
+    requested_programme: Track;
+    justification: string;
+  }): Promise<ProgrammeRequest> {
+    return api.post("/organizations/programme-requests", payload);
+  },
+
+  reviewProgrammeRequest(
+    requestId: string,
+    payload: { decision: "approved" | "rejected"; review_note?: string }
+  ): Promise<ProgrammeRequest> {
+    return api.post(`/organizations/programme-requests/${requestId}/review`, payload);
+  },
+
+  listAuthorityScopes(): Promise<AuthorityScope[]> {
+    return api.get("/authority/scopes");
+  },
+
+  createAuthorityScope(payload: {
+    user_id: string;
+    organization_id?: string | null;
+    assigned_emirates: string[];
+    assigned_facility_ids?: string[];
+    can_publish?: boolean;
+    can_view_reports?: boolean;
+    min_suppression_k?: number;
+  }): Promise<AuthorityScope> {
+    return api.post("/authority/scopes", payload);
+  },
+
+  revokeAuthorityScope(scopeId: string): Promise<{ revoked: boolean; id: string }> {
+    return api.delete(`/authority/scopes/${scopeId}`);
+  },
+
+  listAuthorityNotices(): Promise<AuthorityNotice[]> {
+    return api.get("/authority/notices");
+  },
+
+  previewAuthorityNotice(payload: {
+    title: string;
+    message: string;
+    plain_language_action?: string;
+    severity: "info" | "advisory" | "urgent";
+    scope_emirate?: string;
+    facility_ids?: string[];
+    eligible_programmes: string[];
+  }): Promise<{ organization_count: number; recipient_count: number; organizations: Array<{ id: string; name: string; emirate?: string | null }> }> {
+    return api.post("/authority/notices/preview", payload);
+  },
+
+  createAuthorityNotice(payload: {
+    title: string;
+    message: string;
+    plain_language_action?: string;
+    severity: "info" | "advisory" | "urgent";
+    scope_emirate?: string;
+    facility_ids?: string[];
+    eligible_programmes: string[];
+    acknowledgement_required?: boolean;
+    idempotency_key?: string;
+  }): Promise<AuthorityNotice> {
+    return api.post("/authority/notices", payload);
+  },
+
+  updateAuthorityNotice(
+    noticeId: string,
+    payload: Partial<{
+      title: string;
+      message: string;
+      plain_language_action: string;
+      severity: "info" | "advisory" | "urgent";
+      scope_emirate: string;
+      eligible_programmes: string[];
+    }>
+  ): Promise<AuthorityNotice> {
+    return api.patch(`/authority/notices/${noticeId}`, payload);
+  },
+
+  publishAuthorityNotice(noticeId: string): Promise<AuthorityNotice> {
+    return api.post(`/authority/notices/${noticeId}/publish`);
+  },
+
+  withdrawAuthorityNotice(noticeId: string): Promise<AuthorityNotice> {
+    return api.post(`/authority/notices/${noticeId}/withdraw`);
+  },
+
+  getAuthorityReports(): Promise<AuthorityReport> {
+    return api.get("/authority/reports");
+  },
+
+  listVisibleNotices(): Promise<AuthorityNotice[]> {
+    return api.get("/notices");
+  },
+
+  markNoticeRead(noticeId: string): Promise<{ notice_id: string; state: string; read_at: string }> {
+    return api.post(`/notices/${noticeId}/read`);
+  },
+
+  acknowledgeNotice(noticeId: string): Promise<{ notice_id: string; acknowledged: boolean; acknowledged_at: string }> {
+    return api.post(`/notices/${noticeId}/acknowledgements`);
   },
 };

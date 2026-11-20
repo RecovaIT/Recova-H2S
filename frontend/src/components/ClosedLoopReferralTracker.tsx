@@ -36,7 +36,7 @@ export function ClosedLoopReferralTracker({
   onUpdated?: () => void;
 }) {
   const { pushToast } = useToast();
-  const [modal, setModal] = useState<"notify" | "book" | "complete" | "missed" | "verify" | null>(null);
+  const [modal, setModal] = useState<"notify" | "book" | "complete" | "missed" | "verify" | "cancel" | null>(null);
   const [busy, setBusy] = useState(false);
 
   const [channel, setChannel] = useState<NotificationChannel>("in_app");
@@ -136,22 +136,25 @@ export function ClosedLoopReferralTracker({
                 <Bell className="h-3.5 w-3.5" /> Notify Patient
               </Button>
             )}
-            {canWrite && referral.status !== "proposed" && (
+            {canWrite && ["approved","patient_notified","booked","missed","escalated"].includes(referral.status) && (
               <Button variant="outline" size="sm" onClick={() => setModal("book")}>
                 <CalendarCheck className="h-3.5 w-3.5" /> Book Appointment
               </Button>
             )}
-            {canWrite && referral.status !== "proposed" && (
+            {canWrite && referral.status === "booked" && (
               <Button variant="outline" size="sm" onClick={() => setModal("complete")}>
                 <CheckCircle2 className="h-3.5 w-3.5" /> Complete Consultation
               </Button>
             )}
-            {canWrite && referral.status !== "proposed" && (
+            {canWrite && referral.status === "booked" && (
               <Button variant="destructive" size="sm" onClick={() => setModal("missed")}>
                 <AlertTriangle className="h-3.5 w-3.5" /> Mark Missed / Escalate
               </Button>
             )}
-            {canVerifyOutcome && (
+            {canWrite && referral.status !== "consultation_completed" && (
+              <Button variant="outline" size="sm" onClick={() => setModal("cancel")}>Cancel referral</Button>
+            )}
+            {canVerifyOutcome && referral.status === "consultation_completed" && (
               <Button size="sm" onClick={() => setModal("verify")}>
                 <ShieldCheck className="h-3.5 w-3.5" /> Verify Outcome
               </Button>
@@ -201,6 +204,14 @@ export function ClosedLoopReferralTracker({
       </CardContent>
 
       {/* Modals */}
+      <Dialog open={modal === "cancel"} onOpenChange={(o) => !o && setModal(null)} title="Cancel referral">
+        <div className="space-y-3">
+          <Label htmlFor="cancel-reason">Reason for cancellation</Label>
+          <Textarea id="cancel-reason" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <p className="text-sm text-slate-600">The patient will see this change in My care. The audit history is retained.</p>
+          <Button variant="destructive" disabled={busy || notes.trim().length < 3} onClick={() => runAction(() => careService.cancelReferral(referral.id, notes.trim()), "Referral cancelled")}>Confirm cancellation</Button>
+        </div>
+      </Dialog>
       <Dialog open={modal === "notify"} onOpenChange={(o) => !o && setModal(null)} title="Notify Patient">
         <div className="space-y-3">
           <div className="space-y-1">

@@ -112,3 +112,61 @@ class IntegrationConfig(UUIDPk, Timestamped, Base):
     secrets_encrypted: Mapped[str | None] = mapped_column(Text)  # Fernet-encrypted JSON
     last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_test_result: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class PublicHealthNotice(UUIDPk, Timestamped, Base):
+    __tablename__ = "public_health_notices"
+
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="SET NULL"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    plain_language_action: Mapped[str | None] = mapped_column(Text)
+    issuer: Mapped[str] = mapped_column(String(160), nullable=False, default="Recova Public Health Authority")
+    category: Mapped[str] = mapped_column(String(60), nullable=False, default="advisory")
+    severity: Mapped[str] = mapped_column(String(20), nullable=False, default="info")  # info|advisory|urgent
+    scope_emirate: Mapped[str | None] = mapped_column(String(80))
+    facility_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    eligible_programmes: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=lambda: ["core", "loop", "neuro", "worksafe"])
+    acknowledgement_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")  # draft|published|expired|withdrawn
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    idempotency_key: Mapped[str | None] = mapped_column(String(120), unique=True)
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    withdrawn_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+
+
+class NoticeRecipient(UUIDPk, Timestamped, Base):
+    __tablename__ = "notice_recipients"
+    __table_args__ = (UniqueConstraint("notice_id", "user_id", name="uq_notice_recipient_user"),)
+
+    notice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("public_health_notices.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="SET NULL"))
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="available")  # available|read|acknowledged
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provider_delivery_status: Mapped[str] = mapped_column(String(30), nullable=False, default="in_app_available")
+
+
+class NoticeAcknowledgement(UUIDPk, Timestamped, Base):
+    __tablename__ = "notice_acknowledgements"
+    __table_args__ = (UniqueConstraint("notice_id", "user_id", name="uq_notice_ack_user"),)
+
+    notice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("public_health_notices.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="SET NULL"))
+    acknowledged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

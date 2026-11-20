@@ -1,0 +1,37 @@
+# Demo runbook | Proposed 4-minute presentation
+CEO narration draft. Rehearse against the deployed main build before recording.
+
+## 0:00-0:20 | Open on the selected programme dashboard
+Narration: Recova is one shared engine with four programme experiences: relapse prevention, population-health follow-up, cognitive wellness and workforce wellbeing. A facility selects its programme during onboarding; patients use a mobile portal shaped by their enrolment. Today we will demonstrate synthetic cases and explain exactly where our prototype ends.
+
+Operator: show the release URL and selected organisation/programme. Use clearly labelled synthetic demonstration records; never imply that they are real patients.
+
+## 0:20-1:00 | Case D: safety before routine scoring
+Narration: First, this synthetic crisis case tests the emergency gate. The engine is designed to identify configured acute warning signals before continuing routine analysis. Here we inspect the recorded gate result and the urgent event presented to the clinical team. This is decision support: the clinical service must own and verify its emergency response. Recova does not replace emergency care or guarantee response time.
+
+Operator: BM-CORE-04 or its prepared persistent synthetic equivalent. Show Gate 2, resulting run state and emergency record. Do not promise a live animated sequence unless the actual deployment passes that check.
+
+## 1:00-1:45 | Case B: change from the patient's baseline
+Narration: This second case shows a change against an individual baseline. The deterministic signal matrix exposes the observations and scoring trace so a clinician can inspect what contributed to the result. Missing streams and confounders matter. The separate AI explanation is an optional draft, subject to consent and provider configuration; it cannot change the deterministic score or approve a referral. If the provider is unavailable, we show that honestly.
+
+Operator: BM-CORE-02 or prepared equivalent. Show baseline, score, completeness, limitations, then the separate Agent 5 status and review action.
+
+## 1:45-2:20 | Neuro: context changes interpretation
+Narration: In this synthetic presbycusis case, hearing context must be considered when interpreting cognitive performance. Show the configured confounder in the trace and the resulting limitation. This is cognitive wellness support, not a dementia diagnosis. The patient memory exercise is practice and should not be presented as a validated clinical assessment.
+
+Operator: BM-NEURO-02 or prepared equivalent. Confirm the current fixture's expected result before recording; do not invent results or claim untested modality safeguards.
+
+## 2:20-2:55 | Patient check-in and follow-up
+Narration: The patient experience is designed for mobile use. A patient sees their programme, records a check-in, manages permissions and can review follow-up information. In this demonstration we save an action to the backend and show that it survives refresh. Wearable data can be imported from supported files; direct device-provider connections remain dependent on real integrations.
+
+Operator: patient-scoped account in a separate session, narrow viewport, submit check-in, refresh. Return to staff view and show its stored record. Never expose shared demo passwords in the video.
+
+## 2:55-3:35 | Benchmarks and honest boundaries
+Narration: Our benchmark screen makes authored engineering scenarios visible. We show the suite version, actual run results and any failures. Passing these synthetic checks tells us the implementation matches those expected scenarios; it does not establish clinical accuracy, prevention effectiveness or real-world safety. Our documentation records data assumptions, provider dependencies and deployment limitations.
+
+Operator: run the actual available suite and show timestamp and counts. Benchmark fixtures may be ephemeral; prepare separate persistent demo records rather than expecting benchmark patients to remain in the patient list.
+
+## 3:35-4:00 | Commercial path and close
+Narration: After the competition, our next step is a clinic-led feasibility pilot once a partner, approvals and clinical capacity are in place. We propose measuring whether routine flags lead to documented follow-up within fourteen days. There is no active pilot or confirmed commercial agreement. The opportunity is one inspectable engine, multiple care settings, and a measurable route from signal to human follow-up.
+
+Preflight: team agrees order; screen recording and audio work; no personal patient data; staff and patient sessions are separate; test accounts have the required permissions; provider states are truthful; prepared cases reproduce expected results; links work from a fresh browser. Do not record a claim that has not been demonstrated.
