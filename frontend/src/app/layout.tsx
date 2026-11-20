@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { AuthProvider } from "@/hooks/useAuth";
+import { LanguageProvider } from "@/hooks/useLanguage";
 import { ToastProvider } from "@/components/ui/toast";
 import "./globals.css";
 
@@ -28,9 +29,11 @@ export default function RootLayout({
       className={montserrat.variable}
     >
       <body className="min-h-full bg-slate-50 text-slate-900">
-        <ToastProvider>
-          <AuthProvider>{children}</AuthProvider>
-        </ToastProvider>
+        <LanguageProvider>
+          <ToastProvider>
+            <AuthProvider>{children}</AuthProvider>
+          </ToastProvider>
+        </LanguageProvider>
       </body>
     </html>
   );

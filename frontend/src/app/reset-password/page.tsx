@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 import { authService } from "@/services/auth";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { useLanguage } from "@/hooks/useLanguage";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -79,12 +81,19 @@ function ResetPasswordInner() {
 }
 
 export default function ResetPasswordPage() {
+  const { tr } = useLanguage();
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-slate-100 p-4">
+      <LanguageSwitcher variant="floating" />
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Confirm Password Reset</CardTitle>
-          <CardDescription>Choose your private password. This email link can only be used once.</CardDescription>
+          <CardTitle>{tr("Confirm Password Reset", "تأكيد إعادة تعيين كلمة المرور")}</CardTitle>
+          <CardDescription>
+            {tr(
+              "Choose your private password. This email link can only be used once.",
+              "اختر كلمة مرور خاصة بك. يمكن استخدام هذا الرابط لمرة واحدة فقط."
+            )}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Suspense fallback={<p className="text-xs text-slate-500">Loading form...</p>}>

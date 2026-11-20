@@ -98,7 +98,10 @@ describe("DecideAiReviewWorkspace", () => {
 
     expect(screen.getByText("HRV dropped 2.85 SD below personal baseline.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /الملخص العربي/i }));
-    const arDiv = screen.getByText("انخفض تقلب معدل ضربات القلب بمقدار 2.85.");
-    expect(arDiv).toHaveAttribute("dir", "rtl");
+    const arText = screen.getByText("انخفض تقلب معدل ضربات القلب بمقدار 2.85.");
+    const arContainer = arText.closest("[dir='rtl']");
+    expect(arContainer).toHaveAttribute("dir", "rtl");
+    expect(arContainer).toHaveAttribute("lang", "ar");
+    expect(screen.getByText(/مسودة مساعدة للقرار السريري/)).toBeInTheDocument();
   });
 });

@@ -10,6 +10,7 @@ import {
   HardHat,
   Check,
 } from "lucide-react";
+import { useLanguage } from "@/hooks/useLanguage";
 import styles from "./landing-styles";
 
 // Public product descriptions, not records or simulated application data.
@@ -108,6 +109,7 @@ const programmes = [
 
 export function ProgrammeExplorer() {
   const [selected, setSelected] = useState(0);
+  const { t, tr } = useLanguage();
   const current = programmes[selected];
   const Icon = current.icon;
   function navigate(event: KeyboardEvent<HTMLButtonElement>, index: number) {
@@ -128,7 +130,7 @@ export function ProgrammeExplorer() {
       <div
         className={styles.programmeTabs}
         role="tablist"
-        aria-label="Recova programmes"
+        aria-label={t("Recova programmes")}
       >
         {programmes.map((programme, index) => {
           const TabIcon = programme.icon;
@@ -147,8 +149,8 @@ export function ProgrammeExplorer() {
             >
               <TabIcon size={23} strokeWidth={1.6} aria-hidden="true" />
               <span>
-                <strong>{programme.name}</strong>
-                <small>{programme.label}</small>
+                <strong>{t(programme.name)}</strong>
+                <small>{t(programme.label)}</small>
               </span>
               <ArrowRight
                 size={18}
@@ -168,14 +170,14 @@ export function ProgrammeExplorer() {
       >
         <div key={current.id} className={styles.programmeContent}>
           <div className={styles.programmeCopy}>
-            <span className={styles.eyebrow}>{current.note}</span>
-            <h3>{current.title}</h3>
-            <p>{current.description}</p>
+            <span className={styles.eyebrow}>{t(current.note)}</span>
+            <h3>{t(current.title)}</h3>
+            <p>{t(current.description)}</p>
             <ul>
               {current.capabilities.map((item) => (
                 <li key={item}>
                   <Check size={16} aria-hidden="true" />
-                  {item}
+                  {t(item)}
                 </li>
               ))}
             </ul>
@@ -183,21 +185,22 @@ export function ProgrammeExplorer() {
               className={styles.textLink}
               href={`/register-organization?programme=${current.id}`}
             >
-              Choose {current.name} <ArrowRight size={17} aria-hidden="true" />
+              {tr(`Choose ${current.name}`, `اختر ${t(current.name)}`)}{" "}
+              <ArrowRight size={17} aria-hidden="true" />
             </Link>
           </div>
           <div className={styles.programmeAside}>
             <div className={styles.programmeSymbol}>
               <Icon size={68} strokeWidth={1} aria-hidden="true" />
             </div>
-            <span className={styles.miniLabel}>THE PARTICIPANT EXPERIENCE</span>
-            <h4>{current.patientTitle}</h4>
-            <p>{current.patientDescription}</p>
+            <span className={styles.miniLabel}>{t("THE PARTICIPANT EXPERIENCE")}</span>
+            <h4>{t(current.patientTitle)}</h4>
+            <p>{t(current.patientDescription)}</p>
             <div className={styles.audience}>
-              <span>Built for</span>
-              <p>{current.audience}</p>
-              <span>On the patient side</span>
-              <p>{current.experience}</p>
+              <span>{t("Built for")}</span>
+              <p>{t(current.audience)}</p>
+              <span>{t("On the patient side")}</span>
+              <p>{t(current.experience)}</p>
             </div>
           </div>
         </div>

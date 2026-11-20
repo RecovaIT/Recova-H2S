@@ -418,9 +418,9 @@ export default function SettingsPage() {
               <CardHeader>
                 <CardTitle>Active Programme &amp; Expansion Request</CardTitle>
                 <CardDescription>
-                  Primary programme:{" "}
+                  <span>Primary programme</span>:{" "}
                   <strong>{session?.active_organization?.primary_programme || session?.tracks?.[0] || "—"}</strong>{" "}
-                  · Enabled tracks: {session?.tracks?.join(", ") || "—"}
+                  · <span>Enabled tracks</span>: {session?.tracks?.join(", ") || "—"}
                 </CardDescription>
               </CardHeader>
               <CardContent>

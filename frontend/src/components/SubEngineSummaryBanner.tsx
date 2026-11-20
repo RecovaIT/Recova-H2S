@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { Activity, AlertOctagon, CheckCircle2, ShieldAlert, Users } from "lucide-react";
 import { opsService } from "@/services/ops";
 import { useAuth } from "@/hooks/useAuth";
+import { useLanguage } from "@/hooks/useLanguage";
 import type { OverviewReport, Track } from "@/types/recova";
 import { cn } from "@/lib/utils";
 
@@ -15,13 +16,14 @@ const TRACK_LABELS: Record<Track, string> = {
 };
 
 export function SubEngineSummaryBanner({ track }: { track: Track }) {
-  const {session}=useAuth();
-  const aggregateOnly=session?.role === "supervisor";
+  const { session } = useAuth();
+  const { t, tr } = useLanguage();
+  const aggregateOnly = session?.role === "supervisor";
   const [overview, setOverview] = useState<OverviewReport | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if(aggregateOnly)return;
+    if (aggregateOnly) return;
     let active = true;
     opsService
       .getOverview()
@@ -37,9 +39,15 @@ export function SubEngineSummaryBanner({ track }: { track: Track }) {
     return () => {
       active = false;
     };
-  }, [track,aggregateOnly]);
+  }, [track, aggregateOnly]);
 
-  if(aggregateOnly)return <p className="text-sm text-slate-600">Your department heatmap below protects individual privacy. Clinical actions are managed by the occupational health team.</p>;
+  if (aggregateOnly) {
+    return (
+      <p className="text-sm text-slate-600">
+        {t("Your department heatmap below protects individual privacy. Clinical actions are managed by the occupational health team.")}
+      </p>
+    );
+  }
 
   const dist = overview?.track_risk_distribution?.[track] || {};
   const green = dist.GREEN || 0;
@@ -50,37 +58,37 @@ export function SubEngineSummaryBanner({ track }: { track: Track }) {
 
   const tiles = [
     {
-      label: `${TRACK_LABELS[track]} enrolled`,
+      label: tr(`${TRACK_LABELS[track]} enrolled`, `المسجلون في ${t(TRACK_LABELS[track])}`),
       value: loading ? "—" : totalEnrolled,
-      detail: "Active programme enrolments",
+      detail: t("Active programme enrolments"),
       icon: Users,
       featured: true,
     },
     {
-      label: "Stable (GREEN)",
+      label: t("Stable (GREEN)"),
       value: loading ? "—" : green,
-      detail: "Within personal baseline",
+      detail: t("Within personal baseline"),
       icon: CheckCircle2,
       tone: "green",
     },
     {
-      label: "Early warning (AMBER)",
+      label: t("Early warning (AMBER)"),
       value: loading ? "—" : amber,
       detail: "1.0 <= |Z| < 1.96",
       icon: Activity,
       tone: "amber",
     },
     {
-      label: "Needs attention (RED)",
+      label: t("Needs attention (RED)"),
       value: loading ? "—" : red,
-      detail: "|Z| >= 1.96 or Gate 2 bypass",
+      detail: t("|Z| >= 1.96 or Gate 2 bypass"),
       icon: AlertOctagon,
       tone: "rose",
     },
     {
-      label: "Awaiting baseline",
+      label: t("Awaiting baseline"),
       value: loading ? "—" : unscored,
-      detail: "Insufficient windows (<3) or unscored",
+      detail: t("Insufficient windows (<3) or unscored"),
       icon: ShieldAlert,
       tone: "blue",
     },

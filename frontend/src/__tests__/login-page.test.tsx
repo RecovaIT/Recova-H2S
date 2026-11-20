@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { LanguageProvider } from "@/hooks/useLanguage";
 import LoginPage from "@/app/login/page";
 import { OrganizationOnboardingCard } from "@/components/OrganizationOnboardingCard";
 import { AuthGuard } from "@/components/AuthGuard";
@@ -198,5 +199,25 @@ describe("LoginPage & Tenant Onboarding", () => {
     await user.click(screen.getByRole("button", { name: /switch to b/i }));
     await waitFor(() => expect(screen.getByTestId("active-org")).toHaveTextContent("org-b"));
     expect(screen.getByLabelText("Draft")).toHaveValue("org-a-draft");
+  });
+
+  it("toggles English and Arabic RTL from the top-right switch on LoginPage", async () => {
+    window.localStorage.removeItem("recova_lang");
+    window.localStorage.removeItem("recova_portal_lang");
+    const user = userEvent.setup({ delay: null });
+    render(
+      <LanguageProvider>
+        <AuthProvider>
+          <LoginPage />
+        </AuthProvider>
+      </LanguageProvider>
+    );
+    const toggle = await screen.findByRole("button", { name: "Toggle language" });
+    await user.click(toggle);
+    expect(screen.getByText("مرحبًا بك في ريكوفا")).toBeInTheDocument();
+    expect(document.documentElement).toHaveAttribute("dir", "rtl");
+    expect(document.documentElement).toHaveAttribute("lang", "ar");
+    await user.click(screen.getByRole("button", { name: "Toggle language" }));
+    expect(document.documentElement).toHaveAttribute("dir", "ltr");
   });
 });

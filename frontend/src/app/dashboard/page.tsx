@@ -27,6 +27,7 @@ import {
   YAxis,
 } from "recharts";
 import { useAuth } from "@/hooks/useAuth";
+import { useLanguage } from "@/hooks/useLanguage";
 import { engineService } from "@/services/engine";
 import { opsService } from "@/services/ops";
 import type { OverviewReport, PipelineRun, PlatformOverviewReport, Track } from "@/types/recova";
@@ -121,6 +122,7 @@ const RISK_SERIES = [
 export default function DashboardPage() {
   const router=useRouter();
   const { session, hasPermission, hasTrack, refreshSession } = useAuth();
+  const { t, tr } = useLanguage();
   const reduceMotion = useReducedMotion();
   const [overview, setOverview] = useState<OverviewReport | null>(null);
   const [platformOverview, setPlatformOverview] = useState<PlatformOverviewReport | null>(null);
@@ -194,44 +196,47 @@ export default function DashboardPage() {
   const enrollments = totals.reduce((sum, series) => sum + series.total, 0);
   const statistics = [
     {
-      label: "Active participants",
+      label: t("Active participants"),
       value: overview?.active_patients,
       icon: Users,
-      detail: "Across your care pathways",
+      detail: t("Across your care pathways"),
       featured: true,
     },
     {
-      label: "Open emergencies",
+      label: t("Open emergencies"),
       value: overview?.open_emergencies,
       icon: AlertOctagon,
-      detail: "Immediate clinical triage",
+      detail: t("Immediate clinical triage"),
       tone: "rose",
     },
     {
-      label: "Pending reviews",
+      label: t("Pending reviews"),
       value: overview?.pending_clinician_reviews,
       icon: ClipboardCheck,
-      detail: "Awaiting clinician sign-off",
+      detail: t("Awaiting clinician sign-off"),
       tone: "amber",
     },
     {
-      label: "Open referrals",
+      label: t("Open referrals"),
       value: overview?.open_referrals,
       icon: GitBranch,
-      detail: `${overview?.sla_breaches ?? 0} overdue follow-ups`,
+      detail: tr(
+        `${overview?.sla_breaches ?? 0} overdue follow-ups`,
+        `${overview?.sla_breaches ?? 0} متابعات متأخرة`
+      ),
       tone: "blue",
     },
     {
-      label: "Verified outcomes",
+      label: t("Verified outcomes"),
       value: overview?.verified_outcomes,
       icon: CheckCircle2,
-      detail: "Care loops completed",
+      detail: t("Care loops completed"),
       tone: "green",
     },
   ];
   const attentionItems = [
     {
-      label: "Emergency triage",
+      label: t("Emergency triage"),
       value: overview?.open_emergencies ?? 0,
       href: "/agents",
       icon: AlertOctagon,
@@ -239,7 +244,7 @@ export default function DashboardPage() {
       tone: "rose",
     },
     {
-      label: "Clinical review",
+      label: t("Clinical review"),
       value: overview?.pending_clinician_reviews ?? 0,
       href: "/reviews",
       icon: ClipboardCheck,
@@ -247,7 +252,7 @@ export default function DashboardPage() {
       tone: "amber",
     },
     {
-      label: "Overdue follow-ups",
+      label: t("Overdue follow-ups"),
       value: overview?.sla_breaches ?? 0,
       href: "/referrals",
       icon: GitBranch,
@@ -268,14 +273,14 @@ export default function DashboardPage() {
             {hasPermission("benchmarks:read") && (
               <Link href="/benchmarks">
                 <Button size="sm" variant="ghost">
-                  Benchmarks
+                  {t("Benchmarks")}
                 </Button>
               </Link>
             )}
             {hasPermission("patients:read") && (
               <Link href="/patients">
                 <Button size="sm">
-                  <Users className="h-3.5 w-3.5" /> View participants
+                  <Users className="h-3.5 w-3.5" /> {t("View participants")}
                 </Button>
               </Link>
             )}
@@ -303,9 +308,9 @@ export default function DashboardPage() {
                       onChange={(e) => setLegacyProgramme(e.target.value as Track)}
                       className="h-9 rounded-lg border border-amber-300 bg-white px-3 text-xs font-medium text-slate-900"
                     >
-                      {TRACKS.map((t) => (
-                        <option key={t.key} value={t.key}>
-                          {t.title}
+                      {TRACKS.map((trk) => (
+                        <option key={trk.key} value={trk.key}>
+                          {t(trk.title)}
                         </option>
                       ))}
                     </select>
@@ -326,7 +331,7 @@ export default function DashboardPage() {
                         }
                       }}
                     >
-                      {selectingLegacy ? "Saving..." : "Confirm Primary Programme"}
+                      {selectingLegacy ? t("Saving...") : t("Confirm Primary Programme")}
                     </Button>
                   </div>
                 </CardContent>
@@ -527,14 +532,14 @@ export default function DashboardPage() {
                     </ResponsiveContainer>
                   </div>
                 )}
-                <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-4 sm:grid-cols-4">
+                    <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-4 sm:grid-cols-4">
                   {totals.map((series) => (
                     <div key={series.key}>
                       <p className="text-lg font-semibold tabular-nums">
                         {loading ? "…" : series.total}
                       </p>
                       <p className="mt-0.5 text-[10px] text-slate-500">
-                        {series.label}
+                        {t(series.label)}
                       </p>
                     </div>
                   ))}
@@ -544,8 +549,8 @@ export default function DashboardPage() {
 
             <Card className="dashboard-panel flex flex-col">
               <CardHeader>
-                <CardTitle>Needs your attention</CardTitle>
-                <CardDescription>Next steps for your care team</CardDescription>
+                <CardTitle>{t("Needs your attention")}</CardTitle>
+                <CardDescription>{t("Next steps for your care team")}</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-1 flex-col">
                 <div className="space-y-2">
@@ -574,26 +579,27 @@ export default function DashboardPage() {
                   ))}
                   {attentionItems.length === 0 && (
                     <p className="py-6 text-xs text-slate-500">
-                      Your role has no pending action queues.
+                      {t("Your role has no pending action queues.")}
                     </p>
                   )}
                 </div>
                 <div className="mt-auto pt-5">
                   <div className="rounded-xl bg-[#eef7f0] p-4">
                     <span className="mb-2 flex items-center gap-2 text-xs font-semibold text-[#32634f]">
-                      <CheckCircle2 className="h-4 w-4" /> Closed-loop care
+                      <CheckCircle2 className="h-4 w-4" /> {t("Closed-loop care")}
                     </span>
                     <p className="text-[11px] leading-relaxed text-[#4e7060]">
-                      {overview?.verified_outcomes ?? 0} verified outcomes
-                      recorded. Follow each referral through to a confirmed
-                      result.
+                      {tr(
+                        `${overview?.verified_outcomes ?? 0} verified outcomes recorded. Follow each referral through to a confirmed result.`,
+                        `تم تسجيل ${overview?.verified_outcomes ?? 0} نتيجة موثّقة. تابع كل إحالة حتى تأكيد النتيجة.`
+                      )}
                     </p>
                     {hasPermission("referrals:read") && (
                       <Link
                         href="/referrals"
                         className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-semibold text-teal-700"
                       >
-                        View care pathways <ArrowRight className="h-3 w-3" />
+                        {t("View care pathways")} <ArrowRight className="h-3 w-3" />
                       </Link>
                     )}
                   </div>
@@ -605,10 +611,10 @@ export default function DashboardPage() {
           <section aria-labelledby="pathways-title">
             <div className="mb-3 flex items-center justify-between">
               <h2 id="pathways-title" className="text-sm font-semibold">
-                {isPlatformAdmin ? "Recova Sub-Engines" : "Your Registered Programme"}
+                {isPlatformAdmin ? t("Recova Sub-Engines") : t("Your Registered Programme")}
               </h2>
               <span className="text-[10px] text-slate-500">
-                {tracks.length} active
+                {tr(`${tracks.length} active`, `${tracks.length} نشط`)}
               </span>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -626,10 +632,10 @@ export default function DashboardPage() {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-xs font-semibold">
-                      {track.title}
+                      {t(track.title)}
                     </span>
                     <span className="mt-1 block text-[10px] leading-relaxed text-slate-500">
-                      {track.description}
+                      {t(track.description)}
                     </span>
                   </span>
                   <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform group-hover:translate-x-1" />
@@ -645,10 +651,10 @@ export default function DashboardPage() {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-xs font-semibold text-[#004263]">
-                      Request another engine
+                      {t("Request another engine")}
                     </span>
                     <span className="mt-1 block text-[10px] leading-relaxed text-slate-500">
-                      Submit an audited request to expand your center&apos;s programmes
+                      {t("Submit an audited request to expand your center's programmes")}
                     </span>
                   </span>
                   <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform group-hover:translate-x-1" />
@@ -663,16 +669,16 @@ export default function DashboardPage() {
                 <CardHeader className="flex-row flex-wrap items-center justify-between gap-3">
                   <div>
                     <CardTitle id="engine-command-title">
-                      Recova Overall Engine — 4 Sub-Dashboards &amp; Customer Centers
+                      {t("Recova Overall Engine — 4 Sub-Dashboards & Customer Centers")}
                     </CardTitle>
                     <CardDescription className="mt-1">
-                      {platformOverview.total_centers} active centers ·{" "}
-                      {platformOverview.total_active_patients} participants ·{" "}
-                      {platformOverview.total_staff_members} staff users ·{" "}
-                      {platformOverview.total_pipeline_runs} total runs
+                      {tr(
+                        `${platformOverview.total_centers} active centers · ${platformOverview.total_active_patients} participants · ${platformOverview.total_staff_members} staff users · ${platformOverview.total_pipeline_runs} total runs`,
+                        `${platformOverview.total_centers} مراكز نشطة · ${platformOverview.total_active_patients} مشاركًا · ${platformOverview.total_staff_members} مستخدمًا · ${platformOverview.total_pipeline_runs} تشغيلات`
+                      )}
                     </CardDescription>
                   </div>
-                  <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Sub-engine dashboards">
+                  <div className="flex flex-wrap gap-1.5" role="tablist" aria-label={t("Sub-engine dashboards")}>
                     {TRACKS.map((trk) => {
                       const active = selectedSubEngine === trk.key;
                       return (
@@ -689,7 +695,7 @@ export default function DashboardPage() {
                               : "bg-[#f0f6f9] text-[#2a4558] hover:bg-[#d7e6ed]"
                           )}
                         >
-                          {trk.name} ({platformOverview.sub_engines[trk.key as Track]?.total_centers ?? 0})
+                          {t(trk.name)} ({platformOverview.sub_engines[trk.key as Track]?.total_centers ?? 0})
                         </button>
                       );
                     })}
@@ -698,48 +704,51 @@ export default function DashboardPage() {
                 <CardContent className="space-y-4">
                   {(() => {
                     const sub = platformOverview.sub_engines[selectedSubEngine];
-                    const meta = TRACKS.find((t) => t.key === selectedSubEngine);
+                    const meta = TRACKS.find((trk) => trk.key === selectedSubEngine);
                     if (!sub) return null;
                     return (
                       <>
                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
                           <div className="rounded-xl border border-[#e2edf2] bg-[#f8fbfc] p-3">
-                            <p className="text-[10px] font-medium text-[#5a7d93]">Centers</p>
+                            <p className="text-[10px] font-medium text-[#5a7d93]">{t("Centers")}</p>
                             <p className="mt-1 text-xl font-semibold tabular-nums text-[#011621]">{sub.total_centers}</p>
                           </div>
                           <div className="rounded-xl border border-[#e2edf2] bg-[#f8fbfc] p-3">
-                            <p className="text-[10px] font-medium text-[#5a7d93]">Participants</p>
+                            <p className="text-[10px] font-medium text-[#5a7d93]">{t("Participants")}</p>
                             <p className="mt-1 text-xl font-semibold tabular-nums text-[#011621]">{sub.total_patients}</p>
                           </div>
                           <div className="rounded-xl border border-[#e2edf2] bg-[#f8fbfc] p-3">
-                            <p className="text-[10px] font-medium text-[#5a7d93]">Staff Users</p>
+                            <p className="text-[10px] font-medium text-[#5a7d93]">{t("Staff Users")}</p>
                             <p className="mt-1 text-xl font-semibold tabular-nums text-[#011621]">{sub.total_staff}</p>
                           </div>
                           <div className="rounded-xl border border-[#e2edf2] bg-[#f8fbfc] p-3">
-                            <p className="text-[10px] font-medium text-[#5a7d93]">Engine Runs</p>
+                            <p className="text-[10px] font-medium text-[#5a7d93]">{t("Engine Runs")}</p>
                             <p className="mt-1 text-xl font-semibold tabular-nums text-[#011621]">{sub.total_runs}</p>
                           </div>
                           <div className="rounded-xl border border-[#e2edf2] bg-[#f8fbfc] p-3">
-                            <p className="text-[10px] font-medium text-[#5a7d93]">Open Emergencies</p>
+                            <p className="text-[10px] font-medium text-[#5a7d93]">{t("Open Emergencies")}</p>
                             <p className="mt-1 text-xl font-semibold tabular-nums text-[#ef4444]">{sub.open_emergencies}</p>
                           </div>
                         </div>
 
                         {sub.centers.length === 0 ? (
                           <EmptyState
-                            title={`No centers registered for ${meta?.title || selectedSubEngine}`}
-                            description="Centers selecting this primary programme during onboarding will appear here with their live metrics."
+                            title={tr(
+                              `No centers registered for ${meta?.title || selectedSubEngine}`,
+                              `لا توجد مراكز مسجلة لـ ${t(meta?.title || selectedSubEngine)}`
+                            )}
+                            description={t("Centers selecting this primary programme during onboarding will appear here with their live metrics.")}
                           />
                         ) : (
                           <Table>
                             <TableHeader>
                               <TableRow>
-                                <TableHead>Customer Center</TableHead>
-                                <TableHead>Type / Emirate</TableHead>
-                                <TableHead>Participants</TableHead>
-                                <TableHead>Staff</TableHead>
-                                <TableHead>Runs</TableHead>
-                                <TableHead>Emergencies</TableHead>
+                                <TableHead>{t("Customer Center")}</TableHead>
+                                <TableHead>{t("Type / Emirate")}</TableHead>
+                                <TableHead>{t("Participants")}</TableHead>
+                                <TableHead>{t("Staff")}</TableHead>
+                                <TableHead>{t("Runs")}</TableHead>
+                                <TableHead>{t("Emergencies")}</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -749,7 +758,7 @@ export default function DashboardPage() {
                                     {center.name}
                                   </TableCell>
                                   <TableCell className="text-xs text-[#5a7d93]">
-                                    {center.org_type} · {center.emirate || "UAE"}
+                                    {t(center.org_type)} · {t(center.emirate || "UAE")}
                                   </TableCell>
                                   <TableCell className="text-xs font-medium tabular-nums">{center.active_patients}</TableCell>
                                   <TableCell className="text-xs tabular-nums">{center.staff_members}</TableCell>
@@ -802,16 +811,16 @@ export default function DashboardPage() {
             <Card className="dashboard-panel">
               <CardHeader className="flex-row flex-wrap items-center justify-between gap-3">
                 <div>
-                  <CardTitle>Recent activity</CardTitle>
+                  <CardTitle>{t("Recent activity")}</CardTitle>
                   <CardDescription className="mt-1">
-                    Latest assessments across your care pathways
+                    {t("Latest assessments across your care pathways")}
                   </CardDescription>
                 </div>
                 <Link
                   href="/agents"
                   className="inline-flex items-center gap-2 text-[11px] font-semibold text-teal-700"
                 >
-                  View all activity <ArrowRight className="h-3.5 w-3.5" />
+                  {t("View all activity")} <ArrowRight className="h-3.5 w-3.5" />
                 </Link>
               </CardHeader>
               <CardContent>
@@ -819,17 +828,17 @@ export default function DashboardPage() {
                   <div className="h-24 animate-pulse rounded-xl bg-slate-100" />
                 ) : runs.length === 0 ? (
                   <EmptyState
-                    title="Ready for your first assessment"
-                    description="Add a check-in, screening or wearable observation to start a care assessment."
+                    title={t("Ready for your first assessment")}
+                    description={t("Add a check-in, screening or wearable observation to start a care assessment.")}
                   />
                 ) : (
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Pathway</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Risk tier</TableHead>
-                        <TableHead>Recorded</TableHead>
+                        <TableHead>{t("Pathway")}</TableHead>
+                        <TableHead>{t("Status")}</TableHead>
+                        <TableHead>{t("Risk tier")}</TableHead>
+                        <TableHead>{t("Recorded")}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -840,8 +849,10 @@ export default function DashboardPage() {
                               <span className="rounded-lg bg-slate-100 p-2 text-teal-700">
                                 <Activity className="h-3.5 w-3.5" />
                               </span>
-                              {TRACKS.find((track) => track.key === run.track)
-                                ?.title || run.track}
+                              {t(
+                                TRACKS.find((track) => track.key === run.track)
+                                  ?.title || run.track
+                              )}
                             </span>
                           </TableCell>
                           <TableCell>
@@ -851,7 +862,7 @@ export default function DashboardPage() {
                             {run.risk_tier ? (
                               <RiskBadge tier={run.risk_tier} />
                             ) : (
-                              "Awaiting score"
+                              t("Awaiting score")
                             )}
                           </TableCell>
                           <TableCell className="whitespace-nowrap text-xs text-slate-500">
