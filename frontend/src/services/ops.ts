@@ -10,6 +10,7 @@ import type {
   InsurancePlan,
   IntegrationConfig,
   JobRecord,
+  LlmKeyStatus,
   Organization,
   OverviewReport,
   Page,
@@ -202,6 +203,10 @@ export const opsService = {
 
   listIntegrations(): Promise<IntegrationConfig[]> {
     return api.get("/settings/integrations");
+  },
+
+  getLlmKeyStatus(provider = "gemini"): Promise<LlmKeyStatus> {
+    return api.get("/settings/integrations/llm/key-status", { provider });
   },
 
   upsertIntegration(

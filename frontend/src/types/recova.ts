@@ -688,6 +688,15 @@ export interface IntegrationConfig {
   last_test_result?: Record<string, unknown> | null;
 }
 
+export interface LlmKeyStatus {
+  provider: string;
+  key_available: boolean;
+  source: "org_encrypted" | "backend_env" | "none";
+  masked_key?: string | null;
+  default_model?: string | null;
+  default_base_url?: string | null;
+}
+
 export interface Workplace {
   id: string;
   organization_id: string;

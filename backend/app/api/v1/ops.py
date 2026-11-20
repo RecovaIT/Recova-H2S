@@ -37,6 +37,7 @@ from app.schemas.workflow import (
     InsurancePlanOut,
     IntegrationConfigOut,
     IntegrationConfigUpdate,
+    LlmKeyStatusOut,
 )
 from app.services import care as care_svc
 from app.tasks.queue import enqueue
@@ -327,6 +328,14 @@ def create_care_facility(req: CareFacilityCreate, ctx: AuthContext = Depends(req
 @settings_router.get("/integrations", response_model=list[IntegrationConfigOut])
 def list_integrations(ctx: AuthContext = Depends(requires(P.SETTINGS_READ))):
     return care_svc.list_integrations(ctx)
+
+
+@settings_router.get("/integrations/llm/key-status", response_model=LlmKeyStatusOut)
+def get_llm_key_status(
+    provider: str = Query("gemini"),
+    ctx: AuthContext = Depends(requires(P.SETTINGS_MANAGE)),
+):
+    return care_svc.get_llm_key_status(ctx, provider)
 
 
 @settings_router.put("/integrations/{name}", response_model=IntegrationConfigOut)

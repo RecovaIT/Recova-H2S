@@ -69,6 +69,14 @@ class Settings(BaseSettings):
     llm_azure_deployment: str = ""
     llm_azure_api_version: str = "2024-06-01"
     llm_timeout_seconds: float = 45.0
+    # Optional per-provider VPS env keys (checked directly by selected provider)
+    gemini_api_key: str = ""
+    google_api_key: str = ""
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    azure_openai_api_key: str = ""
+    azure_openai_endpoint: str = ""
+    azure_openai_deployment: str = ""
 
     # Notification providers
     smtp_host: str = ""
@@ -152,13 +160,59 @@ class Settings(BaseSettings):
                 raise ValueError("COOKIE_SECURE must be true in production")
         return self
 
+    def resolve_llm_env(self, provider: str | None = None) -> dict[str, str]:
+        """Resolve LLM credentials from VPS env vars for `provider` (or default `llm_provider`)."""
+        p = (provider or self.llm_provider or "none").strip().lower()
+        if p == "none":
+            for cand in ("gemini", "openai", "anthropic", "azure_openai"):
+                resolved = self.resolve_llm_env(cand)
+                if resolved.get("api_key"):
+                    return resolved
+            return {}
+
+        key = ""
+        base_url = self.llm_base_url if self.llm_provider == p else ""
+        azure_dep = self.llm_azure_deployment if self.llm_provider == p else ""
+
+        if p == "gemini":
+            key = self.gemini_api_key or self.google_api_key
+        elif p == "openai":
+            key = self.openai_api_key
+        elif p == "anthropic":
+            key = self.anthropic_api_key
+        elif p == "azure_openai":
+            key = self.azure_openai_api_key
+            base_url = base_url or self.azure_openai_endpoint
+            azure_dep = azure_dep or self.azure_openai_deployment
+
+        if not key and self.llm_provider == p:
+            key = self.llm_api_key
+
+        if not key.strip():
+            return {}
+
+        return {
+            "provider": p,
+            "api_key": key.strip(),
+            "model": self.llm_model if self.llm_provider == p else "",
+            "base_url": base_url.strip(),
+            "azure_deployment": azure_dep.strip(),
+            "azure_api_version": self.llm_azure_api_version,
+        }
+
     @property
     def llm_configured(self) -> bool:
-        if self.llm_provider == "none" or not self.llm_api_key:
-            return False
-        if self.llm_provider == "azure_openai":
-            return bool(self.llm_base_url and self.llm_azure_deployment)
-        return True
+        if self.llm_provider != "none" and self.llm_api_key:
+            if self.llm_provider == "azure_openai":
+                return bool(self.llm_base_url and self.llm_azure_deployment)
+            return True
+        return bool(
+            self.gemini_api_key
+            or self.google_api_key
+            or self.openai_api_key
+            or self.anthropic_api_key
+            or (self.azure_openai_api_key and self.azure_openai_endpoint and self.azure_openai_deployment)
+        )
 
     @property
     def smtp_configured(self) -> bool:

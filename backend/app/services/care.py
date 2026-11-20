@@ -1206,9 +1206,16 @@ def upsert_integration(
         row = IntegrationConfig(organization_id=ctx.org_id, integration=name)
         ctx.db.add(row)
     row.enabled = req.enabled
+    prev_provider = str((row.settings or {}).get("provider") or "").strip().lower()
+    next_provider = str((req.settings or {}).get("provider") or "").strip().lower()
     row.settings = req.settings
     if req.secrets is not None:
         row.secrets_encrypted = encrypt_str(json.dumps(req.secrets))
+    elif name == "llm" and (
+        bool((req.settings or {}).get("use_backend_env"))
+        or (prev_provider and next_provider and prev_provider != next_provider)
+    ):
+        row.secrets_encrypted = None
     row.status = (
         IntegrationStatus.CONFIGURED.value
         if req.enabled
@@ -1251,15 +1258,17 @@ def test_integration(ctx: AuthContext, name: str) -> dict:
         from app.core.config import get_settings
 
         s = get_settings()
-        provider = org_cfg.get("provider") or s.llm_provider
-        has_key = bool(org_cfg.get("api_key") or s.llm_api_key)
+        provider = str(org_cfg.get("provider") or s.llm_provider or "none").strip().lower()
+        env_cfg = s.resolve_llm_env(None if provider == "none" else provider)
+        effective_provider = provider if provider != "none" else (env_cfg.get("provider") or "none")
+        has_key = bool(org_cfg.get("api_key") or env_cfg.get("api_key"))
         res = (
             {
                 "status": IntegrationStatus.CONFIGURED.value,
                 "connected": False,
-                "message": f"LLM provider '{provider}' credentials saved. A consented synthesis is needed to verify a response.",
+                "message": f"LLM provider '{effective_provider}' credentials saved. A consented synthesis is needed to verify a response.",
             }
-            if provider != "none" and has_key
+            if effective_provider != "none" and has_key
             else {
                 "status": IntegrationStatus.NOT_CONFIGURED.value,
                 "connected": False,
@@ -1311,3 +1320,85 @@ def test_integration(ctx: AuthContext, name: str) -> dict:
     )
     ctx.db.commit()
     return res
+
+
+_DEFAULT_LLM_MODELS = {
+    "gemini": "gemini-2.0-flash",
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-3-5-sonnet-latest",
+    "azure_openai": "gpt-4o",
+}
+
+
+def _mask_secret_key(raw: str) -> str:
+    clean = raw.strip()
+    if len(clean) >= 10:
+        return f"{clean[:4]}{'•' * 8}{clean[-4:]}"
+    return "•" * 12
+
+
+def get_llm_key_status(ctx: AuthContext, provider: str) -> dict:
+    ctx.require(P.SETTINGS_MANAGE)
+    from app.core.config import get_settings
+    from app.core.security import decrypt_str
+
+    p = (provider or "gemini").strip().lower()
+    if p not in {"gemini", "openai", "anthropic", "azure_openai", "none"}:
+        raise ValidationFailed(f"Unsupported LLM provider: {provider}")
+
+    default_model = _DEFAULT_LLM_MODELS.get(p)
+    if p == "none":
+        return {
+            "provider": p,
+            "key_available": False,
+            "source": "none",
+            "masked_key": None,
+            "default_model": None,
+            "default_base_url": None,
+        }
+
+    # 1. Check backend (VPS) environment first so manual API key entry is skipped when routed on server
+    s = get_settings()
+    env_cfg = s.resolve_llm_env(p)
+    if env_cfg.get("api_key"):
+        return {
+            "provider": p,
+            "key_available": True,
+            "source": "backend_env",
+            "masked_key": _mask_secret_key(env_cfg["api_key"]),
+            "default_model": env_cfg.get("model") or default_model,
+            "default_base_url": env_cfg.get("base_url") or None,
+        }
+
+    # 2. Fall back to organisation's encrypted DB secret when VPS env has no key for this provider
+    row = ctx.db.scalar(
+        select(IntegrationConfig).where(
+            IntegrationConfig.organization_id == ctx.org_id,
+            IntegrationConfig.integration == "llm",
+        )
+    )
+    if row is not None:
+        org_provider = str((row.settings or {}).get("provider") or "").strip().lower()
+        if org_provider == p and row.secrets_encrypted:
+            raw_secret = decrypt_str(row.secrets_encrypted)
+            if raw_secret:
+                parsed = json.loads(raw_secret)
+                org_key = str(parsed.get("api_key") or "").strip()
+                if org_key:
+                    return {
+                        "provider": p,
+                        "key_available": True,
+                        "source": "org_encrypted",
+                        "masked_key": _mask_secret_key(org_key),
+                        "default_model": str((row.settings or {}).get("model") or "") or default_model,
+                        "default_base_url": str((row.settings or {}).get("base_url") or "") or None,
+                    }
+
+    return {
+        "provider": p,
+        "key_available": False,
+        "source": "none",
+        "masked_key": None,
+        "default_model": default_model,
+        "default_base_url": None,
+    }
